@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "137975298196",
+    "project_id": "worklife-bb9e9",
+    "storage_bucket": "worklife-bb9e9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:137975298196:android:2b368c8a491236caa31c81",
+        "android_client_info": {
+          "package_name": "com.example.worklife"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAuQC-PPvkH3ES8in6tByYUgQKeuU-EKwE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
