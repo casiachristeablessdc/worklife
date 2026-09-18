@@ -57,7 +57,6 @@ class DefaultFirebaseOptions {
     projectId: 'worklife-bb9e9',
     storageBucket: 'worklife-bb9e9.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyDho_hrOHIPOU5W1vZbYlsPy-tbRrVcYys',
     appId: '1:137975298196:ios:2a8a792d30a3790ca31c81',
@@ -66,7 +65,6 @@ class DefaultFirebaseOptions {
     storageBucket: 'worklife-bb9e9.firebasestorage.app',
     iosBundleId: 'com.example.worklife',
   );
-
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyDho_hrOHIPOU5W1vZbYlsPy-tbRrVcYys',
     appId: '1:137975298196:ios:2a8a792d30a3790ca31c81',
