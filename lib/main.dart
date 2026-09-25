@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 
 import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
+import 'screens/landing/landing_screen.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,14 +27,8 @@ class WorkLifeApp extends StatelessWidget {
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'WorkLife',
-        home: Scaffold(
-          appBar: AppBar(
-            title: const Text('WorkLife'),
-          ),
-          body: const Center(
-            child: Text('WorkLife foundation ready!'),
-          ),
-        ),
+        theme: AppTheme.light,
+       home: const LandingScreen(),
       ),
     );
   }
