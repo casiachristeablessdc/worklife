@@ -10,4 +10,16 @@ class FirestoreService {
   DocumentReference<Map<String, dynamic>> userDocument(String userId) {
     return usersCollection().doc(userId);
   }
+
+  Future<void> createUserProfile({
+    required String userId,
+    required String name,
+    required String email,
+  }) {
+    return userDocument(userId).set({
+      'name': name,
+      'email': email,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
 }

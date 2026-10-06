@@ -1,6 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuthException;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 
+import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
 import '../auth/login_screen.dart';
 import '../auth/register_screen.dart';
@@ -84,7 +87,57 @@ class LandingScreen extends StatelessWidget {
                         _PrimaryButton(
                           label: 'Continue with Google',
                           icon: Icons.g_mobiledata_rounded,
-                          onPressed: () {},
+                          onPressed: () async {
+                            try {
+                              await context
+                                  .read<AuthProvider>()
+                                  .signInWithGoogle();
+
+                              if (!context.mounted) return;
+
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Logged in with Google successfully.',
+                                  ),
+                                ),
+                              );
+                            } on FirebaseAuthException catch (e) {
+                              if (!context.mounted) return;
+
+                              String message;
+
+                              switch (e.code) {
+                                case 'account-exists-with-different-credential':
+                                  message =
+                                      'An account already exists with this email using another sign-in method.';
+                                  break;
+                                case 'network-request-failed':
+                                  message =
+                                      'Check your internet connection and try again.';
+                                  break;
+                                default:
+                                  message =
+                                      'Google sign-in failed. Please try again.';
+                              }
+
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(message),
+                                ),
+                              );
+                            } catch (_) {
+                              if (!context.mounted) return;
+
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Google sign-in failed. Please try again.',
+                                  ),
+                                ),
+                              );
+                            }
+                          },
                         ),
 
                         const SizedBox(height: 10),
@@ -128,28 +181,6 @@ class LandingScreen extends StatelessWidget {
                                 color: AppColors.line,
                                 thickness: 1,
                               ),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 14),
-
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _SocialButton(
-                              icon: Icons.apple,
-                              onPressed: () {},
-                            ),
-                            const SizedBox(width: 12),
-                            _SocialButton(
-                              icon: Icons.facebook_rounded,
-                              onPressed: () {},
-                            ),
-                            const SizedBox(width: 12),
-                            _SocialButton(
-                              icon: Icons.close_rounded,
-                              onPressed: () {},
                             ),
                           ],
                         ),
@@ -282,7 +313,6 @@ class _BotanicalIllustrationPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
-    // Large soft botanical background shapes.
     canvas.drawCircle(
       Offset(centerX - 75, 108),
       74,
@@ -304,7 +334,6 @@ class _BotanicalIllustrationPainter extends CustomPainter {
       peachPaint,
     );
 
-    // Main stem.
     final stemPath = Path()
       ..moveTo(centerX, 245)
       ..cubicTo(
@@ -318,7 +347,6 @@ class _BotanicalIllustrationPainter extends CustomPainter {
 
     canvas.drawPath(stemPath, stemPaint);
 
-    // Left branch.
     final leftBranch = Path()
       ..moveTo(centerX, 185)
       ..cubicTo(
@@ -332,7 +360,6 @@ class _BotanicalIllustrationPainter extends CustomPainter {
 
     canvas.drawPath(leftBranch, stemPaint);
 
-    // Right branch.
     final rightBranch = Path()
       ..moveTo(centerX + 2, 165)
       ..cubicTo(
@@ -346,7 +373,6 @@ class _BotanicalIllustrationPainter extends CustomPainter {
 
     canvas.drawPath(rightBranch, stemPaint);
 
-    // Large central leaf.
     final centerLeaf = Path()
       ..moveTo(centerX, 155)
       ..cubicTo(
@@ -369,7 +395,6 @@ class _BotanicalIllustrationPainter extends CustomPainter {
 
     canvas.drawPath(centerLeaf, darkGreenPaint);
 
-    // Left leaf.
     final leftLeaf = Path()
       ..moveTo(centerX - 36, 139)
       ..cubicTo(
@@ -392,7 +417,6 @@ class _BotanicalIllustrationPainter extends CustomPainter {
 
     canvas.drawPath(leftLeaf, darkGreenPaint);
 
-    // Right leaf.
     final rightLeaf = Path()
       ..moveTo(centerX + 35, 130)
       ..cubicTo(
@@ -415,7 +439,6 @@ class _BotanicalIllustrationPainter extends CustomPainter {
 
     canvas.drawPath(rightLeaf, darkGreenPaint);
 
-    // Lower left leaf.
     final lowerLeftLeaf = Path()
       ..moveTo(centerX - 8, 205)
       ..cubicTo(
@@ -438,7 +461,6 @@ class _BotanicalIllustrationPainter extends CustomPainter {
 
     canvas.drawPath(lowerLeftLeaf, eucalyptusPaint);
 
-    // Lower right leaf.
     final lowerRightLeaf = Path()
       ..moveTo(centerX + 7, 202)
       ..cubicTo(
@@ -461,7 +483,6 @@ class _BotanicalIllustrationPainter extends CustomPainter {
 
     canvas.drawPath(lowerRightLeaf, eucalyptusPaint);
 
-    // Decorative circles.
     canvas.drawCircle(
       Offset(centerX - 112, 180),
       15,
@@ -582,37 +603,6 @@ class _SecondaryButton extends StatelessWidget {
           style: GoogleFonts.inter(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SocialButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onPressed;
-
-  const _SocialButton({
-    required this.icon,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 44,
-      height: 44,
-      child: Material(
-        color: Colors.white.withValues(alpha: 0.72),
-        shape: const CircleBorder(),
-        child: InkWell(
-          onTap: onPressed,
-          customBorder: const CircleBorder(),
-          child: Icon(
-            icon,
-            size: 20,
-            color: AppColors.ink,
           ),
         ),
       ),

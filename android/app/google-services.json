@@ -12,7 +12,20 @@
           "package_name": "com.example.worklife"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "137975298196-nni6jmsvj5n2armsaoocj5m61013csbk.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.worklife",
+            "certificate_hash": "c6bfb9a3e58bf2f2aa4a171b0c4471585fa5dcda"
+          }
+        },
+        {
+          "client_id": "137975298196-ob80hl76tvmlb79ndg6bgf3uvb2s0pcm.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAuQC-PPvkH3ES8in6tByYUgQKeuU-EKwE"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "137975298196-ob80hl76tvmlb79ndg6bgf3uvb2s0pcm.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "137975298196-4gmlpdbtvetvrp08jlbjmvq5jlhvaf1u.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.worklife"
+              }
+            }
+          ]
         }
       }
     }

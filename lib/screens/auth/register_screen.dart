@@ -1,6 +1,10 @@
+import 'package:firebase_auth/firebase_auth.dart'
+    show FirebaseAuthException;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 
+import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -25,41 +29,174 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
+  Future<void> _register() async {
+    final pageContext = context;
+
+    final name = _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    if (name.isEmpty || email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(
+          content: Text('Please complete all fields.'),
+        ),
+      );
+      return;
+    }
+
+    if (!_isValidEmail(email)) {
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid email address.'),
+        ),
+      );
+      return;
+    }
+
+    if (password.length < 6) {
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(
+          content: Text('Password must be at least 6 characters.'),
+        ),
+      );
+      return;
+    }
+
+    final authProvider = pageContext.read<AuthProvider>();
+
+    try {
+      await authProvider.register(
+        name: name,
+        email: email,
+        password: password,
+      );
+
+      final user = authProvider.user;
+
+      if (user != null && !user.emailVerified) {
+        await user.sendEmailVerification();
+      }
+
+      if (!pageContext.mounted) return;
+
+      await showDialog<void>(
+        context: pageContext,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return AlertDialog(
+            backgroundColor: AppColors.ivory,
+            title: Text(
+              'Check your email',
+              style: GoogleFonts.fraunces(
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+                color: AppColors.ink,
+              ),
+            ),
+            content: Text(
+              'We sent a verification link to $email. '
+              'Please verify your email before logging in.',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                height: 1.5,
+                color: AppColors.sub,
+              ),
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+
+                  if (pageContext.mounted) {
+                    Navigator.pop(pageContext);
+                  }
+                },
+                child: const Text('Back to login'),
+              ),
+            ],
+          );
+        },
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!pageContext.mounted) return;
+
+      String message;
+
+      switch (e.code) {
+        case 'email-already-in-use':
+          message = 'An account already exists with this email.';
+          break;
+        case 'invalid-email':
+          message = 'Please enter a valid email address.';
+          break;
+        case 'weak-password':
+          message = 'Password is too weak. Use at least 6 characters.';
+          break;
+        case 'network-request-failed':
+          message = 'Check your internet connection and try again.';
+          break;
+        default:
+          message = 'Something went wrong. Please try again.';
+      }
+
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        SnackBar(
+          content: Text(message),
+        ),
+      );
+    } catch (_) {
+      if (!pageContext.mounted) return;
+
+      ScaffoldMessenger.of(pageContext).showSnackBar(
+        const SnackBar(
+          content: Text('Something went wrong. Please try again.'),
+        ),
+      );
+    }
+  }
+
+  bool _isValidEmail(String email) {
+    final emailRegex = RegExp(
+      r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+    );
+
+    return emailRegex.hasMatch(email);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isLoading = context.watch<AuthProvider>().isLoading;
+
     return Scaffold(
       backgroundColor: AppColors.ivory,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'REGISTER',
+                'CREATE ACCOUNT',
                 style: GoogleFonts.inter(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  letterSpacing: 0.66,
-                  color: AppColors.eucalyptusDark,
+                  letterSpacing: 0.8,
+                  color: AppColors.sub,
                 ),
               ),
-
-              const SizedBox(height: 8),
-
+              const SizedBox(height: 10),
               Text(
                 'Create your account',
                 style: GoogleFonts.fraunces(
-                  fontSize: 19,
+                  fontSize: 32,
                   fontWeight: FontWeight.w600,
                   color: AppColors.ink,
                 ),
               ),
-
-              const SizedBox(height: 5),
-
+              const SizedBox(height: 8),
               Text(
-                'Start tracking your work-life with WorkLife.',
+                'Set up your WorkLife account to get started.',
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w400,
@@ -67,152 +204,158 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   color: AppColors.sub,
                 ),
               ),
-
-              const SizedBox(height: 28),
-
-              _FieldLabel(label: 'Name'),
-              const SizedBox(height: 4),
-              TextField(
-                controller: _nameController,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  hintText: 'Alex Rivera',
+              const SizedBox(height: 30),
+              Text(
+                'Name',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.sub,
                 ),
               ),
-
-              const SizedBox(height: 16),
-
-              _FieldLabel(label: 'Email'),
-              const SizedBox(height: 4),
+              const SizedBox(height: 7),
+              TextField(
+                controller: _nameController,
+                textCapitalization: TextCapitalization.words,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: AppColors.ink,
+                ),
+                decoration: const InputDecoration(
+                  hintText: 'Your name',
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Email',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.sub,
+                ),
+              ),
+              const SizedBox(height: 7),
               TextField(
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
-                textInputAction: TextInputAction.next,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: AppColors.ink,
+                ),
                 decoration: const InputDecoration(
                   hintText: 'name@email.com',
                 ),
               ),
-
-              const SizedBox(height: 16),
-
-              _FieldLabel(label: 'Password'),
-              const SizedBox(height: 4),
+              const SizedBox(height: 18),
+              Text(
+                'Password',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.sub,
+                ),
+              ),
+              const SizedBox(height: 7),
               TextField(
                 controller: _passwordController,
                 obscureText: _obscurePassword,
-                textInputAction: TextInputAction.done,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: AppColors.ink,
+                ),
                 decoration: InputDecoration(
                   hintText: '••••••••',
                   suffixIcon: IconButton(
+                    tooltip: _obscurePassword
+                        ? 'Show password'
+                        : 'Hide password',
                     onPressed: () {
                       setState(() {
                         _obscurePassword = !_obscurePassword;
                       });
                     },
-                    color: AppColors.sub,
                     icon: Icon(
                       _obscurePassword
                           ? Icons.visibility_off_outlined
                           : Icons.visibility_outlined,
                       size: 19,
+                      color: AppColors.eucalyptusDark,
                     ),
                   ),
                 ),
               ),
-
-              const Spacer(),
-
-              SizedBox(
+              const SizedBox(height: 24),
+              Container(
                 width: double.infinity,
                 height: 44,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        AppColors.clay,
-                        Color(0xFFC48E5C),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x87D6A574),
-                        blurRadius: 16,
-                        offset: Offset(0, 8),
-                      ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: const LinearGradient(
+                    colors: [
+                      AppColors.clay,
+                      Color(0xFFC48E5C),
                     ],
                   ),
-                  child: ElevatedButton(
-                    onPressed: () {},
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      foregroundColor: Colors.white,
-                      shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 0,
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.clay.withValues(alpha: 0.22),
+                      blurRadius: 14,
+                      offset: const Offset(0, 6),
                     ),
-                    child: Text(
-                      'Create account',
-                      style: GoogleFonts.inter(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  ],
+                ),
+                child: FilledButton(
+                  onPressed: isLoading ? null : _register,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    disabledBackgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    isLoading ? 'Creating account...' : 'Create account',
+                    style: GoogleFonts.inter(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
                     ),
                   ),
                 ),
               ),
-
-              const SizedBox(height: 16),
-
+              const SizedBox(height: 24),
               Center(
-                child: RichText(
-                  text: TextSpan(
-                    style: GoogleFonts.inter(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                      color: AppColors.sub,
-                    ),
-                    children: [
-                      const TextSpan(
-                        text: 'Already have an account? ',
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                  child: RichText(
+                    text: TextSpan(
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppColors.sub,
                       ),
-                      TextSpan(
-                        text: 'Log in',
-                        style: GoogleFonts.inter(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.clayDark,
+                      children: [
+                        const TextSpan(
+                          text: 'Already have an account? ',
                         ),
-                      ),
-                    ],
+                        TextSpan(
+                          text: 'Log in',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.eucalyptusDark,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _FieldLabel extends StatelessWidget {
-  const _FieldLabel({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      label,
-      style: GoogleFonts.inter(
-        fontSize: 12,
-        fontWeight: FontWeight.w500,
-        color: AppColors.sub,
       ),
     );
   }

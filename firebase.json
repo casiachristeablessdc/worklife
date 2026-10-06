@@ -1,1 +1,31 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"worklife-bb9e9","appId":"1:137975298196:android:2b368c8a491236caa31c81","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"worklife-bb9e9","configurations":{"android":"1:137975298196:android:2b368c8a491236caa31c81","ios":"1:137975298196:ios:2a8a792d30a3790ca31c81","macos":"1:137975298196:ios:2a8a792d30a3790ca31c81","web":"1:137975298196:web:9c8cac6c421aa8c8a31c81","windows":"1:137975298196:web:518b04d8a4dd3a46a31c81"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "worklife-bb9e9",
+          "appId": "1:137975298196:android:2b368c8a491236caa31c81",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "worklife-bb9e9",
+          "configurations": {
+            "android": "1:137975298196:android:2b368c8a491236caa31c81",
+            "ios": "1:137975298196:ios:2a8a792d30a3790ca31c81",
+            "macos": "1:137975298196:ios:2a8a792d30a3790ca31c81",
+            "web": "1:137975298196:web:9c8cac6c421aa8c8a31c81",
+            "windows": "1:137975298196:web:518b04d8a4dd3a46a31c81"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "database": "(default)",
+    "location": "asia-southeast1",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}
