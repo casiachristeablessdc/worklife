@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
+import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -119,14 +120,77 @@ class _RegisterScreenState extends State<RegisterScreen> {
         },
       );
     } on FirebaseAuthException catch (e) {
+      debugPrint(
+        'REGISTER ERROR: ${e.code} - ${e.message}',
+      );
+
       if (!pageContext.mounted) return;
+
+      if (e.code == 'email-already-in-use') {
+        await showDialog<void>(
+          context: pageContext,
+          builder: (dialogContext) {
+            return AlertDialog(
+              backgroundColor: AppColors.ivory,
+              title: Text(
+                'Email already registered',
+                style: GoogleFonts.fraunces(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                ),
+              ),
+              content: Text(
+                'An account already exists with $email. '
+                'Please log in instead.',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  height: 1.5,
+                  color: AppColors.sub,
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+                  },
+                  child: Text(
+                    'Cancel',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.sub,
+                    ),
+                  ),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+
+                    if (!pageContext.mounted) return;
+
+                    Navigator.pushReplacement(
+                      pageContext,
+                      MaterialPageRoute(
+                        builder: (_) => LoginScreen(
+                          initialEmail: email,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Log in'),
+                ),
+              ],
+            );
+          },
+        );
+
+        return;
+      }
 
       String message;
 
       switch (e.code) {
-        case 'email-already-in-use':
-          message = 'An account already exists with this email.';
-          break;
         case 'invalid-email':
           message = 'Please enter a valid email address.';
           break;
@@ -315,7 +379,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                   ),
                   child: Text(
-                    isLoading ? 'Creating account...' : 'Create account',
+                    isLoading
+                        ? 'Creating account...'
+                        : 'Create account',
                     style: GoogleFonts.inter(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w600,

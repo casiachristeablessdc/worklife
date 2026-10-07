@@ -1,4 +1,5 @@
-import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuthException;
+import 'package:firebase_auth/firebase_auth.dart'
+    show FirebaseAuthException;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -7,12 +8,21 @@ import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
 import '../auth/login_screen.dart';
 import '../auth/register_screen.dart';
+import '../home/home_screen.dart';
+import '../onboarding/onboarding_screen.dart';
 
 class LandingScreen extends StatelessWidget {
   const LandingScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final authProvider = context.watch<AuthProvider>();
+
+    if (authProvider.isLoggedIn &&
+        authProvider.isOnboardingCompleted) {
+      return const HomeScreen();
+    }
+
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -89,19 +99,27 @@ class LandingScreen extends StatelessWidget {
                           icon: Icons.g_mobiledata_rounded,
                           onPressed: () async {
                             try {
-                              await context
-                                  .read<AuthProvider>()
-                                  .signInWithGoogle();
+                              final authProvider =
+                                  context.read<AuthProvider>();
+
+                              await authProvider.signInWithGoogle();
 
                               if (!context.mounted) return;
 
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Logged in with Google successfully.',
+                              if (!authProvider.isOnboardingCompleted) {
+                                Navigator.pushReplacement(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const OnboardingScreen(),
                                   ),
-                                ),
-                              );
+                                );
+                                return;
+                              }
+
+                              // The completed-account case is now
+                              // handled automatically by LandingScreen's
+                              // provider-driven routing.
                             } on FirebaseAuthException catch (e) {
                               if (!context.mounted) return;
 

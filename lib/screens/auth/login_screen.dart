@@ -6,19 +6,35 @@ import 'package:provider/provider.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
+import '../home/home_screen.dart';
+import '../onboarding/onboarding_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final String? initialEmail;
+
+  const LoginScreen({
+    super.key,
+    this.initialEmail,
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController();
+  late final TextEditingController _emailController;
   final _passwordController = TextEditingController();
 
   bool _obscurePassword = true;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _emailController = TextEditingController(
+      text: widget.initialEmail ?? '',
+    );
+  }
 
   @override
   void dispose() {
@@ -41,17 +57,101 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     try {
-      await context.read<AuthProvider>().login(
+      final authProvider = context.read<AuthProvider>();
+
+      await authProvider.login(
         email: email,
         password: password,
       );
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Logged in successfully.'),
+      final user = authProvider.user;
+
+      if (user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Login failed. Please try again.'),
+          ),
+        );
+        return;
+      }
+
+      await user.reload();
+
+      if (!mounted) return;
+
+      final refreshedUser = FirebaseAuth.instance.currentUser;
+
+      if (refreshedUser == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Login failed. Please try again.'),
+          ),
+        );
+        return;
+      }
+
+      if (!refreshedUser.emailVerified) {
+        await authProvider.logout();
+
+        if (!mounted) return;
+
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) {
+            return AlertDialog(
+              backgroundColor: AppColors.ivory,
+              title: Text(
+                'Verify your email',
+                style: GoogleFonts.fraunces(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                ),
+              ),
+              content: Text(
+                'Your email has not been verified yet. '
+                'Please check your inbox and verify your email before logging in.',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  height: 1.5,
+                  color: AppColors.sub,
+                ),
+              ),
+              actions: [
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(dialogContext);
+                  },
+                  child: const Text('Got it'),
+                ),
+              ],
+            );
+          },
+        );
+
+        return;
+      }
+
+      if (!authProvider.isOnboardingCompleted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const OnboardingScreen(),
+          ),
+          (route) => false,
+        );
+        return;
+      }
+
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const HomeScreen(),
         ),
+        (route) => false,
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
@@ -156,7 +256,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     email: email,
                   );
 
-                 if (!mounted || !dialogContext.mounted) return;
+                  if (!mounted || !dialogContext.mounted) return;
 
                   Navigator.pop(dialogContext);
 
