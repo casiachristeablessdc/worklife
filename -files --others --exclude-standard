@@ -1,0 +1,37 @@
+warning: in the working copy of 'firestore.rules', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/firestore.rules b/firestore.rules[m
+[1mindex 2db4fe4..d0d0c18 100644[m
+[1m--- a/firestore.rules[m
+[1m+++ b/firestore.rules[m
+[36m@@ -3,9 +3,28 @@[m [mrules_version = '2';[m
+ service cloud.firestore {[m
+   match /databases/{database}/documents {[m
+ [m
+[32m+[m[32m    function isOwner(userId) {[m
+[32m+[m[32m      return request.auth != null && request.auth.uid == userId;[m
+[32m+[m[32m    }[m
+[32m+[m
+     match /users/{userId} {[m
+[31m-      allow read, write: if request.auth != null[m
+[31m-        && request.auth.uid == userId;[m
+[32m+[m[32m      allow read, write: if isOwner(userId);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    match /users/{userId}/activities/{activityId} {[m
+[32m+[m[32m      allow read, write: if isOwner(userId);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    match /users/{userId}/checkIns/{checkInId} {[m
+[32m+[m[32m      allow read, write: if isOwner(userId);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    match /users/{userId}/goals/{goalId} {[m
+[32m+[m[32m      allow read, write: if isOwner(userId);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    match /users/{userId}/schedule/{eventId} {[m
+[32m+[m[32m      allow read, write: if isOwner(userId);[m
+     }[m
+   }[m
+ }[m
+\ No newline at end of file[m
