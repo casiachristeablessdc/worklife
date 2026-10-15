@@ -1,5 +1,4 @@
-import 'package:firebase_auth/firebase_auth.dart'
-    show FirebaseAuthException;
+import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuthException;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -39,18 +38,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     if (name.isEmpty || email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(pageContext).showSnackBar(
-        const SnackBar(
-          content: Text('Please complete all fields.'),
-        ),
+        const SnackBar(content: Text('Please complete all fields.')),
       );
       return;
     }
 
     if (!_isValidEmail(email)) {
       ScaffoldMessenger.of(pageContext).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter a valid email address.'),
-        ),
+        const SnackBar(content: Text('Please enter a valid email address.')),
       );
       return;
     }
@@ -67,11 +62,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final authProvider = pageContext.read<AuthProvider>();
 
     try {
-      await authProvider.register(
-        name: name,
-        email: email,
-        password: password,
-      );
+      await authProvider.register(name: name, email: email, password: password);
 
       final user = authProvider.user;
 
@@ -120,9 +111,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         },
       );
     } on FirebaseAuthException catch (e) {
-      debugPrint(
-        'REGISTER ERROR: ${e.code} - ${e.message}',
-      );
+      debugPrint('REGISTER ERROR: ${e.code} - ${e.message}');
 
       if (!pageContext.mounted) return;
 
@@ -172,9 +161,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     Navigator.pushReplacement(
                       pageContext,
                       MaterialPageRoute(
-                        builder: (_) => LoginScreen(
-                          initialEmail: email,
-                        ),
+                        builder: (_) => LoginScreen(initialEmail: email),
                       ),
                     );
                   },
@@ -204,11 +191,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
           message = 'Something went wrong. Please try again.';
       }
 
-      ScaffoldMessenger.of(pageContext).showSnackBar(
-        SnackBar(
-          content: Text(message),
-        ),
-      );
+      ScaffoldMessenger.of(
+        pageContext,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (_) {
       if (!pageContext.mounted) return;
 
@@ -221,9 +206,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   bool _isValidEmail(String email) {
-    final emailRegex = RegExp(
-      r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
-    );
+    final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
 
     return emailRegex.hasMatch(email);
   }
@@ -281,13 +264,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
               TextField(
                 controller: _nameController,
                 textCapitalization: TextCapitalization.words,
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: AppColors.ink,
-                ),
-                decoration: const InputDecoration(
-                  hintText: 'Your name',
-                ),
+                style: GoogleFonts.inter(fontSize: 13, color: AppColors.ink),
+                decoration: const InputDecoration(hintText: 'Your name'),
               ),
               const SizedBox(height: 18),
               Text(
@@ -302,13 +280,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
               TextField(
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: AppColors.ink,
-                ),
-                decoration: const InputDecoration(
-                  hintText: 'name@email.com',
-                ),
+                style: GoogleFonts.inter(fontSize: 13, color: AppColors.ink),
+                decoration: const InputDecoration(hintText: 'name@email.com'),
               ),
               const SizedBox(height: 18),
               Text(
@@ -323,10 +296,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               TextField(
                 controller: _passwordController,
                 obscureText: _obscurePassword,
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: AppColors.ink,
-                ),
+                style: GoogleFonts.inter(fontSize: 13, color: AppColors.ink),
                 decoration: InputDecoration(
                   hintText: '••••••••',
                   suffixIcon: IconButton(
@@ -355,10 +325,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
                   gradient: const LinearGradient(
-                    colors: [
-                      AppColors.clay,
-                      Color(0xFFC48E5C),
-                    ],
+                    colors: [AppColors.clay, Color(0xFFC48E5C)],
                   ),
                   boxShadow: [
                     BoxShadow(
@@ -379,9 +346,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                   ),
                   child: Text(
-                    isLoading
-                        ? 'Creating account...'
-                        : 'Create account',
+                    isLoading ? 'Creating account...' : 'Create account',
                     style: GoogleFonts.inter(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w600,
@@ -403,9 +368,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         color: AppColors.sub,
                       ),
                       children: [
-                        const TextSpan(
-                          text: 'Already have an account? ',
-                        ),
+                        const TextSpan(text: 'Already have an account? '),
                         TextSpan(
                           text: 'Log in',
                           style: GoogleFonts.inter(

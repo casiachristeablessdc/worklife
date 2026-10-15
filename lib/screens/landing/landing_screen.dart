@@ -1,11 +1,11 @@
-import 'package:firebase_auth/firebase_auth.dart'
-    show FirebaseAuthException;
+import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuthException;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
+import '../admin/admin_dashboard_screen.dart';
 import '../auth/login_screen.dart';
 import '../auth/register_screen.dart';
 import '../home/home_screen.dart';
@@ -18,9 +18,8 @@ class LandingScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final authProvider = context.watch<AuthProvider>();
 
-    if (authProvider.isLoggedIn &&
-        authProvider.isOnboardingCompleted) {
-      return const HomeScreen();
+    if (!authProvider.isInitialized) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
@@ -29,11 +28,7 @@ class LandingScreen extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFFE8EBCF),
-              Color(0xFFF5EEDB),
-              AppColors.ivory,
-            ],
+            colors: [Color(0xFFE8EBCF), Color(0xFFF5EEDB), AppColors.ivory],
             stops: [0.0, 0.38, 1.0],
           ),
         ),
@@ -42,16 +37,9 @@ class LandingScreen extends StatelessWidget {
             builder: (context, constraints) {
               return SingleChildScrollView(
                 child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: constraints.maxHeight,
-                  ),
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      22,
-                      16,
-                      22,
-                      18,
-                    ),
+                    padding: const EdgeInsets.fromLTRB(22, 16, 22, 18),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -77,9 +65,7 @@ class LandingScreen extends StatelessWidget {
                         const SizedBox(height: 12),
 
                         Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 18),
                           child: Text(
                             'Plan your time, understand your routines, '
                             'and make room for what matters beyond work.',
@@ -99,27 +85,41 @@ class LandingScreen extends StatelessWidget {
                           icon: Icons.g_mobiledata_rounded,
                           onPressed: () async {
                             try {
-                              final authProvider =
-                                  context.read<AuthProvider>();
+                              final authProvider = context.read<AuthProvider>();
 
                               await authProvider.signInWithGoogle();
 
                               if (!context.mounted) return;
 
+                              if (authProvider.isAdmin) {
+                                Navigator.pushAndRemoveUntil(
+                                  context,
+                                  MaterialPageRoute<void>(
+                                    builder: (_) =>
+                                        const AdminDashboardScreen(),
+                                  ),
+                                  (_) => false,
+                                );
+                                return;
+                              }
+
                               if (!authProvider.isOnboardingCompleted) {
                                 Navigator.pushReplacement(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) =>
-                                        const OnboardingScreen(),
+                                    builder: (_) => const OnboardingScreen(),
                                   ),
                                 );
                                 return;
                               }
 
-                              // The completed-account case is now
-                              // handled automatically by LandingScreen's
-                              // provider-driven routing.
+                              Navigator.pushAndRemoveUntil(
+                                context,
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const HomeScreen(),
+                                ),
+                                (_) => false,
+                              );
                             } on FirebaseAuthException catch (e) {
                               if (!context.mounted) return;
 
@@ -139,11 +139,9 @@ class LandingScreen extends StatelessWidget {
                                       'Google sign-in failed. Please try again.';
                               }
 
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(message),
-                                ),
-                              );
+                              ScaffoldMessenger.of(
+                                context,
+                              ).showSnackBar(SnackBar(content: Text(message)));
                             } catch (_) {
                               if (!context.mounted) return;
 
@@ -291,9 +289,7 @@ class _LandingIllustration extends StatelessWidget {
     return const SizedBox(
       height: 280,
       width: double.infinity,
-      child: CustomPaint(
-        painter: _BotanicalIllustrationPainter(),
-      ),
+      child: CustomPaint(painter: _BotanicalIllustrationPainter()),
     );
   }
 }
@@ -331,193 +327,78 @@ class _BotanicalIllustrationPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
-    canvas.drawCircle(
-      Offset(centerX - 75, 108),
-      74,
-      pistachioPaint,
-    );
+    canvas.drawCircle(Offset(centerX - 75, 108), 74, pistachioPaint);
 
-    canvas.drawCircle(
-      Offset(centerX + 72, 100),
-      82,
-      eucalyptusPaint,
-    );
+    canvas.drawCircle(Offset(centerX + 72, 100), 82, eucalyptusPaint);
 
     canvas.drawOval(
-      Rect.fromCenter(
-        center: Offset(centerX, 98),
-        width: 185,
-        height: 150,
-      ),
+      Rect.fromCenter(center: Offset(centerX, 98), width: 185, height: 150),
       peachPaint,
     );
 
     final stemPath = Path()
       ..moveTo(centerX, 245)
-      ..cubicTo(
-        centerX - 2,
-        205,
-        centerX + 4,
-        165,
-        centerX + 1,
-        110,
-      );
+      ..cubicTo(centerX - 2, 205, centerX + 4, 165, centerX + 1, 110);
 
     canvas.drawPath(stemPath, stemPaint);
 
     final leftBranch = Path()
       ..moveTo(centerX, 185)
-      ..cubicTo(
-        centerX - 18,
-        168,
-        centerX - 34,
-        150,
-        centerX - 47,
-        126,
-      );
+      ..cubicTo(centerX - 18, 168, centerX - 34, 150, centerX - 47, 126);
 
     canvas.drawPath(leftBranch, stemPaint);
 
     final rightBranch = Path()
       ..moveTo(centerX + 2, 165)
-      ..cubicTo(
-        centerX + 22,
-        147,
-        centerX + 38,
-        130,
-        centerX + 48,
-        105,
-      );
+      ..cubicTo(centerX + 22, 147, centerX + 38, 130, centerX + 48, 105);
 
     canvas.drawPath(rightBranch, stemPaint);
 
     final centerLeaf = Path()
       ..moveTo(centerX, 155)
-      ..cubicTo(
-        centerX - 38,
-        135,
-        centerX - 42,
-        98,
-        centerX - 4,
-        74,
-      )
-      ..cubicTo(
-        centerX + 30,
-        96,
-        centerX + 29,
-        130,
-        centerX,
-        155,
-      )
+      ..cubicTo(centerX - 38, 135, centerX - 42, 98, centerX - 4, 74)
+      ..cubicTo(centerX + 30, 96, centerX + 29, 130, centerX, 155)
       ..close();
 
     canvas.drawPath(centerLeaf, darkGreenPaint);
 
     final leftLeaf = Path()
       ..moveTo(centerX - 36, 139)
-      ..cubicTo(
-        centerX - 70,
-        141,
-        centerX - 88,
-        122,
-        centerX - 89,
-        94,
-      )
-      ..cubicTo(
-        centerX - 57,
-        93,
-        centerX - 39,
-        110,
-        centerX - 36,
-        139,
-      )
+      ..cubicTo(centerX - 70, 141, centerX - 88, 122, centerX - 89, 94)
+      ..cubicTo(centerX - 57, 93, centerX - 39, 110, centerX - 36, 139)
       ..close();
 
     canvas.drawPath(leftLeaf, darkGreenPaint);
 
     final rightLeaf = Path()
       ..moveTo(centerX + 35, 130)
-      ..cubicTo(
-        centerX + 67,
-        128,
-        centerX + 83,
-        108,
-        centerX + 80,
-        82,
-      )
-      ..cubicTo(
-        centerX + 49,
-        84,
-        centerX + 34,
-        101,
-        centerX + 35,
-        130,
-      )
+      ..cubicTo(centerX + 67, 128, centerX + 83, 108, centerX + 80, 82)
+      ..cubicTo(centerX + 49, 84, centerX + 34, 101, centerX + 35, 130)
       ..close();
 
     canvas.drawPath(rightLeaf, darkGreenPaint);
 
     final lowerLeftLeaf = Path()
       ..moveTo(centerX - 8, 205)
-      ..cubicTo(
-        centerX - 43,
-        208,
-        centerX - 60,
-        190,
-        centerX - 58,
-        168,
-      )
-      ..cubicTo(
-        centerX - 30,
-        169,
-        centerX - 11,
-        183,
-        centerX - 8,
-        205,
-      )
+      ..cubicTo(centerX - 43, 208, centerX - 60, 190, centerX - 58, 168)
+      ..cubicTo(centerX - 30, 169, centerX - 11, 183, centerX - 8, 205)
       ..close();
 
     canvas.drawPath(lowerLeftLeaf, eucalyptusPaint);
 
     final lowerRightLeaf = Path()
       ..moveTo(centerX + 7, 202)
-      ..cubicTo(
-        centerX + 39,
-        202,
-        centerX + 57,
-        184,
-        centerX + 58,
-        161,
-      )
-      ..cubicTo(
-        centerX + 29,
-        165,
-        centerX + 10,
-        181,
-        centerX + 7,
-        202,
-      )
+      ..cubicTo(centerX + 39, 202, centerX + 57, 184, centerX + 58, 161)
+      ..cubicTo(centerX + 29, 165, centerX + 10, 181, centerX + 7, 202)
       ..close();
 
     canvas.drawPath(lowerRightLeaf, eucalyptusPaint);
 
-    canvas.drawCircle(
-      Offset(centerX - 112, 180),
-      15,
-      clayPaint,
-    );
+    canvas.drawCircle(Offset(centerX - 112, 180), 15, clayPaint);
 
-    canvas.drawCircle(
-      Offset(centerX + 112, 194),
-      12,
-      pistachioPaint,
-    );
+    canvas.drawCircle(Offset(centerX + 112, 194), 12, pistachioPaint);
 
-    canvas.drawCircle(
-      Offset(centerX + 98, 63),
-      10,
-      clayPaint,
-    );
+    canvas.drawCircle(Offset(centerX + 98, 63), 10, clayPaint);
   }
 
   @override
@@ -545,10 +426,7 @@ class _PrimaryButton extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [
-              AppColors.clay,
-              Color(0xFFC48E5C),
-            ],
+            colors: [AppColors.clay, Color(0xFFC48E5C)],
           ),
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
@@ -567,11 +445,7 @@ class _PrimaryButton extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  icon,
-                  color: Colors.white,
-                  size: 21,
-                ),
+                Icon(icon, color: Colors.white, size: 21),
                 const SizedBox(width: 8),
                 Text(
                   label,
@@ -594,10 +468,7 @@ class _SecondaryButton extends StatelessWidget {
   final String label;
   final VoidCallback onPressed;
 
-  const _SecondaryButton({
-    required this.label,
-    required this.onPressed,
-  });
+  const _SecondaryButton({required this.label, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -608,20 +479,14 @@ class _SecondaryButton extends StatelessWidget {
         onPressed: onPressed,
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.eucalyptusDark,
-          side: const BorderSide(
-            color: AppColors.eucalyptus,
-            width: 1.5,
-          ),
+          side: const BorderSide(color: AppColors.eucalyptus, width: 1.5),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(23),
           ),
         ),
         child: Text(
           label,
-          style: GoogleFonts.inter(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
+          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600),
         ),
       ),
     );

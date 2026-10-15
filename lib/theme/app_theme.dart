@@ -31,9 +31,7 @@ class AppTheme {
         onSurface: AppColors.ink,
       ),
 
-      textTheme: GoogleFonts.interTextTheme(
-        base.textTheme,
-      ).copyWith(
+      textTheme: GoogleFonts.interTextTheme(base.textTheme).copyWith(
         displayLarge: GoogleFonts.fraunces(
           fontSize: 32,
           fontWeight: FontWeight.w600,
@@ -75,35 +73,21 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 0,
-        ),
-        constraints: const BoxConstraints(
-          minHeight: 42,
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+        constraints: const BoxConstraints(minHeight: 42),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: AppColors.line,
-            width: 1.5,
-          ),
+          borderSide: const BorderSide(color: AppColors.line, width: 1.5),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: AppColors.clay,
-            width: 1.5,
-          ),
+          borderSide: const BorderSide(color: AppColors.clay, width: 1.5),
         ),
-        hintStyle: GoogleFonts.inter(
-          fontSize: 13,
-          color: AppColors.sub,
-        ),
+        hintStyle: GoogleFonts.inter(fontSize: 13, color: AppColors.sub),
       ),
 
       filledButtonTheme: FilledButtonThemeData(

@@ -6,16 +6,14 @@ import 'package:provider/provider.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
+import '../admin/admin_dashboard_screen.dart';
 import '../home/home_screen.dart';
 import '../onboarding/onboarding_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final String? initialEmail;
 
-  const LoginScreen({
-    super.key,
-    this.initialEmail,
-  });
+  const LoginScreen({super.key, this.initialEmail});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -31,9 +29,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
 
-    _emailController = TextEditingController(
-      text: widget.initialEmail ?? '',
-    );
+    _emailController = TextEditingController(text: widget.initialEmail ?? '');
   }
 
   @override
@@ -49,9 +45,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter your email and password.'),
-        ),
+        const SnackBar(content: Text('Please enter your email and password.')),
       );
       return;
     }
@@ -59,10 +53,7 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final authProvider = context.read<AuthProvider>();
 
-      await authProvider.login(
-        email: email,
-        password: password,
-      );
+      await authProvider.login(email: email, password: password);
 
       if (!mounted) return;
 
@@ -70,9 +61,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (user == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Login failed. Please try again.'),
-          ),
+          const SnackBar(content: Text('Login failed. Please try again.')),
         );
         return;
       }
@@ -85,9 +74,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (refreshedUser == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Login failed. Please try again.'),
-          ),
+          const SnackBar(content: Text('Login failed. Please try again.')),
         );
         return;
       }
@@ -135,12 +122,23 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
+      await authProvider.refreshAuthorization();
+
+      if (!mounted) return;
+
+      if (authProvider.isAdmin) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
+          (route) => false,
+        );
+        return;
+      }
+
       if (!authProvider.isOnboardingCompleted) {
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(
-            builder: (_) => const OnboardingScreen(),
-          ),
+          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
           (route) => false,
         );
         return;
@@ -148,9 +146,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(
-          builder: (_) => const HomeScreen(),
-        ),
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
         (route) => false,
       );
     } on FirebaseAuthException catch (e) {
@@ -179,11 +175,9 @@ class _LoginScreenState extends State<LoginScreen> {
           message = 'Something went wrong. Please try again.';
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (_) {
       if (!mounted) return;
 
@@ -216,13 +210,8 @@ class _LoginScreenState extends State<LoginScreen> {
           content: TextField(
             controller: controller,
             keyboardType: TextInputType.emailAddress,
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              color: AppColors.ink,
-            ),
-            decoration: const InputDecoration(
-              hintText: 'name@email.com',
-            ),
+            style: GoogleFonts.inter(fontSize: 13, color: AppColors.ink),
+            decoration: const InputDecoration(hintText: 'name@email.com'),
           ),
           actions: [
             TextButton(
@@ -280,19 +269,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       message = 'No account was found with that email.';
                       break;
                     case 'network-request-failed':
-                      message =
-                          'Check your internet connection and try again.';
+                      message = 'Check your internet connection and try again.';
                       break;
                     default:
-                      message =
-                          'Something went wrong. Please try again.';
+                      message = 'Something went wrong. Please try again.';
                   }
 
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(message),
-                    ),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text(message)));
                 }
               },
               child: const Text('Send email'),
@@ -358,13 +343,8 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: AppColors.ink,
-                ),
-                decoration: const InputDecoration(
-                  hintText: 'name@email.com',
-                ),
+                style: GoogleFonts.inter(fontSize: 13, color: AppColors.ink),
+                decoration: const InputDecoration(hintText: 'name@email.com'),
               ),
               const SizedBox(height: 18),
               Text(
@@ -379,10 +359,7 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _passwordController,
                 obscureText: _obscurePassword,
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: AppColors.ink,
-                ),
+                style: GoogleFonts.inter(fontSize: 13, color: AppColors.ink),
                 decoration: InputDecoration(
                   hintText: '••••••••',
                   suffixIcon: IconButton(
@@ -431,10 +408,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
                   gradient: const LinearGradient(
-                    colors: [
-                      AppColors.clay,
-                      Color(0xFFC48E5C),
-                    ],
+                    colors: [AppColors.clay, Color(0xFFC48E5C)],
                   ),
                   boxShadow: [
                     BoxShadow(
@@ -477,9 +451,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         color: AppColors.sub,
                       ),
                       children: [
-                        const TextSpan(
-                          text: "Don't have an account? ",
-                        ),
+                        const TextSpan(text: "Don't have an account? "),
                         TextSpan(
                           text: 'Register',
                           style: GoogleFonts.inter(

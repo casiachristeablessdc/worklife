@@ -25,9 +25,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     if (name.isEmpty || jobTitle.isEmpty || company.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please complete all fields.'),
-        ),
+        const SnackBar(content: Text('Please complete all fields.')),
       );
       return;
     }
@@ -88,9 +86,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 controller: _nameController,
                 textCapitalization: TextCapitalization.words,
                 textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  hintText: 'Your name',
-                ),
+                decoration: const InputDecoration(hintText: 'Your name'),
               ),
               const SizedBox(height: 20),
               _FieldLabel(label: 'Job title'),
@@ -113,10 +109,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ),
               const SizedBox(height: 36),
-              FilledButton(
-                onPressed: _continue,
-                child: const Text('Continue'),
-              ),
+              FilledButton(onPressed: _continue, child: const Text('Continue')),
             ],
           ),
         ),
@@ -142,34 +135,17 @@ class OnboardingStepTwoScreen extends StatefulWidget {
       _OnboardingStepTwoScreenState();
 }
 
-class _OnboardingStepTwoScreenState
-    extends State<OnboardingStepTwoScreen> {
+class _OnboardingStepTwoScreenState extends State<OnboardingStepTwoScreen> {
   TimeOfDay _workStartTime = const TimeOfDay(hour: 9, minute: 0);
   TimeOfDay _workEndTime = const TimeOfDay(hour: 18, minute: 0);
 
-  final Set<String> _selectedWorkdays = {
-    'Mon',
-    'Tue',
-    'Wed',
-    'Thu',
-    'Fri',
-  };
+  final Set<String> _selectedWorkdays = {'Mon', 'Tue', 'Wed', 'Thu', 'Fri'};
 
   double _commuteMinutes = 30;
 
-  final List<String> _days = [
-    'Mon',
-    'Tue',
-    'Wed',
-    'Thu',
-    'Fri',
-    'Sat',
-    'Sun',
-  ];
+  final List<String> _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-  Future<void> _selectWorkTime({
-    required bool isStartTime,
-  }) async {
+  Future<void> _selectWorkTime({required bool isStartTime}) async {
     final selectedTime = await showTimePicker(
       context: context,
       initialTime: isStartTime ? _workStartTime : _workEndTime,
@@ -177,11 +153,11 @@ class _OnboardingStepTwoScreenState
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: Theme.of(context).colorScheme.copyWith(
-                  primary: AppColors.clay,
-                  onPrimary: Colors.white,
-                  surface: AppColors.ivory,
-                  onSurface: AppColors.ink,
-                ),
+              primary: AppColors.clay,
+              onPrimary: Colors.white,
+              surface: AppColors.ivory,
+              onSurface: AppColors.ink,
+            ),
           ),
           child: child!,
         );
@@ -251,9 +227,7 @@ class _OnboardingStepTwoScreenState
   void _continue() {
     if (_selectedWorkdays.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select at least one workday.'),
-        ),
+        const SnackBar(content: Text('Please select at least one workday.')),
       );
       return;
     }
@@ -314,9 +288,7 @@ class _OnboardingStepTwoScreenState
                     child: _TimeCard(
                       label: 'Starts',
                       time: _formatTime(_workStartTime),
-                      onTap: () => _selectWorkTime(
-                        isStartTime: true,
-                      ),
+                      onTap: () => _selectWorkTime(isStartTime: true),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -324,9 +296,7 @@ class _OnboardingStepTwoScreenState
                     child: _TimeCard(
                       label: 'Ends',
                       time: _formatTime(_workEndTime),
-                      onTap: () => _selectWorkTime(
-                        isStartTime: false,
-                      ),
+                      onTap: () => _selectWorkTime(isStartTime: false),
                     ),
                   ),
                 ],
@@ -338,8 +308,7 @@ class _OnboardingStepTwoScreenState
                 spacing: 8,
                 runSpacing: 8,
                 children: _days.map((day) {
-                  final isSelected =
-                      _selectedWorkdays.contains(day);
+                  final isSelected = _selectedWorkdays.contains(day);
 
                   return _DayChip(
                     label: day,
@@ -353,18 +322,11 @@ class _OnboardingStepTwoScreenState
               const SizedBox(height: 12),
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(
-                  16,
-                  16,
-                  16,
-                  12,
-                ),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
                 decoration: BoxDecoration(
                   color: AppColors.peach,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: AppColors.line,
-                  ),
+                  border: Border.all(color: AppColors.line),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -406,14 +368,13 @@ class _OnboardingStepTwoScreenState
                     SliderTheme(
                       data: SliderTheme.of(context).copyWith(
                         activeTrackColor: AppColors.clay,
-                        inactiveTrackColor:
-                            AppColors.clay.withValues(alpha: 0.2),
+                        inactiveTrackColor: AppColors.clay.withValues(
+                          alpha: 0.2,
+                        ),
                         thumbColor: AppColors.clay,
-                        overlayColor:
-                            AppColors.clay.withValues(alpha: 0.1),
+                        overlayColor: AppColors.clay.withValues(alpha: 0.1),
                         trackHeight: 4,
-                        thumbShape:
-                            const RoundSliderThumbShape(
+                        thumbShape: const RoundSliderThumbShape(
                           enabledThumbRadius: 8,
                         ),
                       ),
@@ -430,12 +391,9 @@ class _OnboardingStepTwoScreenState
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: Row(
-                        mainAxisAlignment:
-                            MainAxisAlignment.spaceBetween,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
                             '0 min',
@@ -458,10 +416,7 @@ class _OnboardingStepTwoScreenState
                 ),
               ),
               const SizedBox(height: 36),
-              FilledButton(
-                onPressed: _continue,
-                child: const Text('Continue'),
-              ),
+              FilledButton(onPressed: _continue, child: const Text('Continue')),
             ],
           ),
         ),
@@ -495,8 +450,7 @@ class OnboardingStepThreeScreen extends StatefulWidget {
       _OnboardingStepThreeScreenState();
 }
 
-class _OnboardingStepThreeScreenState
-    extends State<OnboardingStepThreeScreen> {
+class _OnboardingStepThreeScreenState extends State<OnboardingStepThreeScreen> {
   final Set<String> _selectedHobbies = {};
   final Set<String> _selectedPersonalLife = {};
   final Set<String> _selectedSideQuests = {};
@@ -550,10 +504,7 @@ class _OnboardingStepThreeScreenState
     'Start a new hobby',
   ];
 
-  void _toggleSelection(
-    Set<String> selection,
-    String value,
-  ) {
+  void _toggleSelection(Set<String> selection, String value) {
     setState(() {
       if (selection.contains(value)) {
         selection.remove(value);
@@ -657,9 +608,7 @@ class _OnboardingStepThreeScreenState
       }
 
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(
-          builder: (_) => const HomeScreen(),
-        ),
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
         (route) => false,
       );
     } catch (_) {
@@ -669,9 +618,7 @@ class _OnboardingStepThreeScreenState
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'We couldn’t save your profile. Please try again.',
-          ),
+          content: Text('We couldn’t save your profile. Please try again.'),
         ),
       );
     }
@@ -720,20 +667,14 @@ class _OnboardingStepThreeScreenState
               const SizedBox(height: 8),
               Text(
                 'Pick anything you enjoy. You can choose more than one.',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: AppColors.sub,
-                ),
+                style: GoogleFonts.inter(fontSize: 12, color: AppColors.sub),
               ),
               const SizedBox(height: 14),
               _ChoiceWrap(
                 options: _hobbies,
                 selected: _selectedHobbies,
                 onSelected: (value) {
-                  _toggleSelection(
-                    _selectedHobbies,
-                    value,
-                  );
+                  _toggleSelection(_selectedHobbies, value);
                 },
               ),
               const SizedBox(height: 12),
@@ -760,20 +701,14 @@ class _OnboardingStepThreeScreenState
               const SizedBox(height: 8),
               Text(
                 'What normally takes up your time outside work?',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: AppColors.sub,
-                ),
+                style: GoogleFonts.inter(fontSize: 12, color: AppColors.sub),
               ),
               const SizedBox(height: 14),
               _ChoiceWrap(
                 options: _personalLife,
                 selected: _selectedPersonalLife,
                 onSelected: (value) {
-                  _toggleSelection(
-                    _selectedPersonalLife,
-                    value,
-                  );
+                  _toggleSelection(_selectedPersonalLife, value);
                 },
               ),
               const SizedBox(height: 30),
@@ -781,27 +716,20 @@ class _OnboardingStepThreeScreenState
               const SizedBox(height: 8),
               Text(
                 'What would you like to make more room for?',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: AppColors.sub,
-                ),
+                style: GoogleFonts.inter(fontSize: 12, color: AppColors.sub),
               ),
               const SizedBox(height: 14),
               _ChoiceWrap(
                 options: _sideQuests,
                 selected: _selectedSideQuests,
                 onSelected: (value) {
-                  _toggleSelection(
-                    _selectedSideQuests,
-                    value,
-                  );
+                  _toggleSelection(_selectedSideQuests, value);
                 },
               ),
               const SizedBox(height: 12),
               _CustomEntry(
                 controller: _customSideQuestController,
-                hintText:
-                    'Something else you want to make time for',
+                hintText: 'Something else you want to make time for',
                 buttonLabel: 'Add',
                 onAdd: _addCustomSideQuest,
               ),
@@ -819,9 +747,7 @@ class _OnboardingStepThreeScreenState
               ],
               const SizedBox(height: 36),
               FilledButton(
-                onPressed: authProvider.isLoading
-                    ? null
-                    : _finishSetup,
+                onPressed: authProvider.isLoading ? null : _finishSetup,
                 child: authProvider.isLoading
                     ? const SizedBox(
                         width: 19,
@@ -890,27 +816,19 @@ class _ChoiceChip extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 13,
-            vertical: 10,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: selected
-                  ? AppColors.eucalyptus
-                  : AppColors.line,
+              color: selected ? AppColors.eucalyptus : AppColors.line,
             ),
           ),
           child: Text(
             label,
             style: GoogleFonts.inter(
               fontSize: 11.5,
-              fontWeight:
-                  selected ? FontWeight.w600 : FontWeight.w500,
-              color: selected
-                  ? AppColors.eucalyptusDark
-                  : AppColors.sub,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              color: selected ? AppColors.eucalyptusDark : AppColors.sub,
             ),
           ),
         ),
@@ -942,9 +860,7 @@ class _CustomEntry extends StatelessWidget {
             controller: controller,
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => onAdd(),
-            decoration: InputDecoration(
-              hintText: hintText,
-            ),
+            decoration: InputDecoration(hintText: hintText),
           ),
         ),
         const SizedBox(width: 8),
@@ -954,9 +870,7 @@ class _CustomEntry extends StatelessWidget {
             onPressed: onAdd,
             style: FilledButton.styleFrom(
               minimumSize: const Size(58, 42),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 14,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
             ),
             child: Text(buttonLabel),
           ),
@@ -970,10 +884,7 @@ class _CustomItems extends StatelessWidget {
   final List<String> items;
   final ValueChanged<String> onRemove;
 
-  const _CustomItems({
-    required this.items,
-    required this.onRemove,
-  });
+  const _CustomItems({required this.items, required this.onRemove});
 
   @override
   Widget build(BuildContext context) {
@@ -982,12 +893,7 @@ class _CustomItems extends StatelessWidget {
       runSpacing: 8,
       children: items.map((item) {
         return Container(
-          padding: const EdgeInsets.only(
-            left: 12,
-            right: 6,
-            top: 6,
-            bottom: 6,
-          ),
+          padding: const EdgeInsets.only(left: 12, right: 6, top: 6, bottom: 6),
           decoration: BoxDecoration(
             color: AppColors.pistachio,
             borderRadius: BorderRadius.circular(10),
@@ -1009,11 +915,7 @@ class _CustomItems extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
                 child: const Padding(
                   padding: EdgeInsets.all(4),
-                  child: Icon(
-                    Icons.close,
-                    size: 14,
-                    color: AppColors.sub,
-                  ),
+                  child: Icon(Icons.close, size: 14, color: AppColors.sub),
                 ),
               ),
             ],
@@ -1027,9 +929,7 @@ class _CustomItems extends StatelessWidget {
 class _OnboardingHeader extends StatelessWidget {
   final int step;
 
-  const _OnboardingHeader({
-    required this.step,
-  });
+  const _OnboardingHeader({required this.step});
 
   @override
   Widget build(BuildContext context) {
@@ -1065,9 +965,7 @@ class _OnboardingHeader extends StatelessWidget {
 class _FieldLabel extends StatelessWidget {
   final String label;
 
-  const _FieldLabel({
-    required this.label,
-  });
+  const _FieldLabel({required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -1085,9 +983,7 @@ class _FieldLabel extends StatelessWidget {
 class _SectionLabel extends StatelessWidget {
   final String label;
 
-  const _SectionLabel({
-    required this.label,
-  });
+  const _SectionLabel({required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -1126,9 +1022,7 @@ class _TimeCard extends StatelessWidget {
           padding: const EdgeInsets.all(15),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: AppColors.line,
-            ),
+            border: Border.all(color: AppColors.line),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1196,9 +1090,7 @@ class _DayChip extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: selected
-                  ? AppColors.eucalyptus
-                  : AppColors.line,
+              color: selected ? AppColors.eucalyptus : AppColors.line,
             ),
           ),
           child: Text(
@@ -1206,9 +1098,7 @@ class _DayChip extends StatelessWidget {
             style: GoogleFonts.inter(
               fontSize: 11,
               fontWeight: FontWeight.w600,
-              color: selected
-                  ? AppColors.eucalyptusDark
-                  : AppColors.sub,
+              color: selected ? AppColors.eucalyptusDark : AppColors.sub,
             ),
           ),
         ),

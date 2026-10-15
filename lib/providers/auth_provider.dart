@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -6,17 +8,78 @@ import '../services/auth_service.dart';
 import '../services/firestore_service.dart';
 
 class AuthProvider extends ChangeNotifier {
+  AuthProvider() {
+    _isLoading = true;
+    _authStateSubscription = _authService.authStateChanges.listen(
+      (user) => unawaited(_restoreSession(user)),
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('AUTH STATE ERROR: $error');
+        _isInitialized = true;
+        _isLoading = false;
+        notifyListeners();
+      },
+    );
+  }
+
   final AuthService _authService = AuthService();
   final FirestoreService _firestoreService = FirestoreService();
+  late final StreamSubscription<User?> _authStateSubscription;
 
   User? _user;
   bool _isLoading = false;
   bool _isOnboardingCompleted = false;
+  bool _isAdmin = false;
+  bool _isInitialized = false;
 
   User? get user => _user;
   bool get isLoading => _isLoading;
   bool get isLoggedIn => _user != null;
   bool get isOnboardingCompleted => _isOnboardingCompleted;
+  bool get isAdmin => _isAdmin;
+  bool get isInitialized => _isInitialized;
+
+  Future<void> _restoreSession(User? user) async {
+    _user = user;
+
+    if (user == null) {
+      _isAdmin = false;
+      _isOnboardingCompleted = false;
+      _isInitialized = true;
+      _isLoading = false;
+      notifyListeners();
+      return;
+    }
+
+    try {
+      final token = await user.getIdTokenResult();
+      _isAdmin = token.claims?['admin'] == true && user.emailVerified;
+    } catch (error) {
+      debugPrint('RESTORE CLAIMS ERROR: $error');
+      _isAdmin = false;
+    }
+
+    try {
+      _isOnboardingCompleted = await _firestoreService.isOnboardingCompleted(
+        user.uid,
+      );
+    } catch (error) {
+      debugPrint('RESTORE PROFILE ERROR: $error');
+      _isOnboardingCompleted = false;
+    }
+
+    if (_authService.currentUser?.uid != user.uid) return;
+    _isInitialized = true;
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<void> refreshAuthorization() async {
+    final currentUser = _authService.currentUser;
+    if (currentUser == null) return;
+
+    await currentUser.getIdTokenResult(true);
+    await _restoreSession(currentUser);
+  }
 
   Future<void> register({
     required String name,
@@ -44,7 +107,14 @@ class AuthProvider extends ChangeNotifier {
         email: email,
       );
 
+      try {
+        await user.updateDisplayName(name.trim());
+      } catch (error) {
+        debugPrint('AUTH DISPLAY NAME UPDATE ERROR: $error');
+      }
+
       _user = user;
+      _isAdmin = false;
       _isOnboardingCompleted = false;
     } finally {
       _isLoading = false;
@@ -52,10 +122,7 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> login({
-    required String email,
-    required String password,
-  }) async {
+  Future<void> login({required String email, required String password}) async {
     _isLoading = true;
     notifyListeners();
 
@@ -72,8 +139,7 @@ class AuthProvider extends ChangeNotifier {
       }
 
       _user = user;
-      _isOnboardingCompleted =
-          await _firestoreService.isOnboardingCompleted(user.uid);
+      await _restoreSession(user);
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -104,8 +170,7 @@ class AuthProvider extends ChangeNotifier {
       }, SetOptions(merge: true));
 
       _user = user;
-      _isOnboardingCompleted =
-          await _firestoreService.isOnboardingCompleted(user.uid);
+      await _restoreSession(user);
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -151,6 +216,12 @@ class AuthProvider extends ChangeNotifier {
         onboardingCompleted: true,
       );
 
+      try {
+        await _user!.updateDisplayName(name.trim());
+      } catch (error) {
+        debugPrint('AUTH DISPLAY NAME UPDATE ERROR: $error');
+      }
+
       _isOnboardingCompleted = true;
     } finally {
       _isLoading = false;
@@ -162,8 +233,15 @@ class AuthProvider extends ChangeNotifier {
     await _authService.logout();
 
     _user = null;
+    _isAdmin = false;
     _isOnboardingCompleted = false;
 
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    unawaited(_authStateSubscription.cancel());
+    super.dispose();
   }
 }

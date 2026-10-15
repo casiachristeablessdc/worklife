@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -11,6 +13,7 @@ import '../profile/profile_screen.dart';
 import '../schedule/schedule_screen.dart';
 import '../../models/activity_model.dart';
 import '../goals/goals_screen.dart';
+import '../../widgets/balance_snapshot_card.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -27,87 +30,6 @@ class HomeScreen extends StatelessWidget {
     }
 
     return 'Good evening';
-  }
-
-  static Future<void> _showEnergyCheckInDialog(
-    BuildContext context,
-    String userId, {
-    int? currentScore,
-  }) async {
-    var selectedScore = currentScore ?? 5;
-    final score = await showDialog<int>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          backgroundColor: AppColors.ivory,
-          title: Text(
-            currentScore == null ? 'Daily energy check-in' : 'Update energy',
-            style: GoogleFonts.fraunces(
-              fontSize: 22,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$selectedScore / 10',
-                style: GoogleFonts.fraunces(
-                  fontSize: 32,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.clayDark,
-                ),
-              ),
-              Slider(
-                value: selectedScore.toDouble(),
-                min: 1,
-                max: 10,
-                divisions: 9,
-                activeColor: AppColors.clay,
-                onChanged: (value) =>
-                    setState(() => selectedScore = value.round()),
-              ),
-              const Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [Text('Low'), Text('High')],
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(selectedScore),
-              child: const Text('Save check-in'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (score == null || !context.mounted) return;
-
-    try {
-      await FirestoreService().createOrUpdateDailyCheckIn(
-        userId: userId,
-        date: DateTime.now(),
-        energyScore: score,
-      );
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Daily check-in saved.')));
-      }
-    } catch (error, stackTrace) {
-      debugPrint('Daily energy check-in failed: $error\n$stackTrace');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save daily check-in.')),
-        );
-      }
-    }
   }
 
   @override
@@ -131,10 +53,6 @@ class HomeScreen extends StatelessWidget {
               : 'there',
         );
 
-        final jobTitle = _readString(data['jobTitle'], fallback: 'Employee');
-
-        final company = _readString(data['company'], fallback: '');
-
         final workStartTime = _readString(
           data['workStartTime'],
           fallback: '9:00 AM',
@@ -146,6 +64,10 @@ class HomeScreen extends StatelessWidget {
         );
 
         final workdays = _readStringList(data['workdays']);
+        final jobTitle = _readString(data['jobTitle'], fallback: 'Work');
+        final isUsualWorkday = workdays.any(
+          (day) => day.toLowerCase().startsWith(_weekdayKey(DateTime.now())),
+        );
 
         final commuteMinutes = _readInt(data['commuteMinutes'], fallback: 60);
         final sleepHours = data['sleepHours'] is num
@@ -155,113 +77,89 @@ class HomeScreen extends StatelessWidget {
             ? (data['restHours'] as num).toDouble().clamp(0, 12).toDouble()
             : null; // This line is now retained
 
-        final workHours = _calculateWorkHours(workStartTime, workEndTime);
-
-        final weeklyWorkHours = workHours * workdays.length;
-        final weeklyCommuteHours = (commuteMinutes * 2 * workdays.length) / 60;
-
         return Scaffold(
           backgroundColor: AppColors.ivory,
           floatingActionButton: _HomeFab(
             onPressed: () {
-              _showActivityDialog(context, user.uid);
+              _showAddMenu(context, user.uid);
             },
           ),
           body: SafeArea(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 100),
+              padding: const EdgeInsets.fromLTRB(18, 20, 18, 112),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _HomeHeader(
                     greeting: _greeting(),
                     name: name,
-                    jobTitle: jobTitle,
-                    company: company,
                     dateLabel: MaterialLocalizations.of(
                       context,
                     ).formatMediumDate(DateTime.now()),
-                    onProfileTap: () {
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(
-                          builder: (_) => const ProfileScreen(),
-                        ),
-                      );
-                    },
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
 
-                  _DailySnapshot(userId: user.uid),
+                  BalanceSnapshotCard(
+                    userId: user.uid,
+                    onEditLife: () => _showScheduleEventDialog(
+                      context,
+                      user.uid,
+                      initialCategory: 'Life',
+                    ),
+                  ),
 
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 22),
 
-                  _EnergyCheckInSection(userId: user.uid),
-
-                  const SizedBox(height: 28),
-
-                  _TimeOverview(
-                    workHours: workHours,
+                  _DailyCheckInSection(
+                    userId: user.uid,
+                    workdayByRoutine: isUsualWorkday,
+                    workStartTime: workStartTime,
+                    workEndTime: workEndTime,
+                    workdays: workdays,
                     commuteMinutes: commuteMinutes,
-                    sleepHours: sleepHours,
-                    onWorkTap: () => _showWorkHoursDialog(
+                    jobTitle: jobTitle,
+                    routineProfileReady: data['workdays'] is List,
+                    sleepHours: sleepHours ?? 8,
+                    restHours: restHours ?? 1,
+                    onEditWork: () => _showWorkHoursDialog(
                       context,
                       user.uid,
                       workStartTime,
                       workEndTime,
                     ),
-                    onCommuteTap: () =>
+                    onEditCommute: () =>
                         _showCommuteDialog(context, user.uid, commuteMinutes),
-                    onSleepTap: () =>
-                        _showSleepDialog(context, user.uid, sleepHours),
-                  ),
-
-                  const SizedBox(height: 28),
-
-                  _HomeScheduleSection(
-                    userId: user.uid,
-                    workHours: workHours,
-                    commuteMinutes: commuteMinutes,
-                    sleepHours: sleepHours,
-                    restHours: restHours,
-                    onRestTap: () =>
+                    onEditRest: () =>
                         _showRestDialog(context, user.uid, restHours),
                   ),
 
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 22),
 
-                  const _SectionTitle(
-                    title: 'Side quest',
-                    subtitle: 'Something worth making time for.',
+                  _HomeScheduleSection(
+                    userId: user.uid,
+                    workStartTime: workStartTime,
+                    workEndTime: workEndTime,
+                    workdays: workdays,
+                    commuteMinutes: commuteMinutes,
+                    jobTitle: jobTitle,
+                    routineProfileReady: data['workdays'] is List,
                   ),
-                  const SizedBox(height: 14),
 
-                  _SideQuestCard(
+                  const SizedBox(height: 22),
+
+                  _TodayChecklistSection(userId: user.uid),
+
+                  const SizedBox(height: 22),
+
+                  _IdeaForTodayCard(
                     sideQuests: _readStringList(data['sideQuests']),
                     customSideQuests: _readStringList(data['customSideQuests']),
-                    onPlan: (suggestion) => _showActivityDialog(
+                    onPlan: (suggestion) => _showScheduleEventDialog(
                       context,
                       user.uid,
                       initialTitle: suggestion,
-                      initialCategory: 'Leisure',
+                      initialCategory: 'Life',
                     ),
-                  ),
-
-                  const SizedBox(height: 28),
-
-                  const _SectionTitle(
-                    title: 'This week',
-                    subtitle:
-                        'Planned work, recovery targets, and personal time.',
-                  ),
-                  const SizedBox(height: 14),
-
-                  _WeeklyOverview(
-                    userId: user.uid,
-                    workHours: weeklyWorkHours,
-                    commuteHours: weeklyCommuteHours,
-                    workdayCount: workdays.length,
-                    sleepHours: sleepHours,
-                    restHours: restHours,
                   ),
                 ],
               ),
@@ -282,6 +180,112 @@ class HomeScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  static String _weekdayKey(DateTime date) =>
+      const ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][date.weekday - 1];
+
+  static Future<void> _showAddMenu(BuildContext context, String userId) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.ivory,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_note_outlined),
+              title: const Text('Plan a time block'),
+              subtitle: const Text('Write a note, then choose area and time.'),
+              onTap: () => Navigator.pop(sheetContext, 'plan'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.checklist_outlined),
+              title: const Text('Add to today’s checklist'),
+              onTap: () => Navigator.pop(sheetContext, 'activity'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.flag_outlined),
+              title: const Text('Add a daily focus'),
+              onTap: () => Navigator.pop(sheetContext, 'focus'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted) return;
+    if (action == 'plan') {
+      await _showScheduleEventDialog(context, userId);
+    } else if (action == 'activity') {
+      await _showActivityDialog(context, userId, initialCategory: 'Life');
+    } else if (action == 'focus') {
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => const GoalsScreen()));
+    }
+  }
+
+  static Future<void> _showScheduleEventDialog(
+    BuildContext context,
+    String userId, {
+    String initialCategory = 'Life',
+    String? initialTitle,
+  }) async {
+    final now = DateTime.now();
+    final suggestedStart = (((now.hour * 60 + now.minute + 14) ~/ 15) * 15)
+        .clamp(0, 1410);
+    final draft = await showDialog<ScheduleEventDraft>(
+      context: context,
+      builder: (_) => ScheduleEventDialog(
+        date: now,
+        initialTitle: initialTitle,
+        initialCategory: initialCategory,
+        initialStartMinutes: suggestedStart,
+        allowDateChange: false,
+      ),
+    );
+    if (draft == null || !context.mounted) return;
+    try {
+      final service = FirestoreService();
+      final existing = await service.scheduleForDate(userId, draft.date).first;
+      if (!context.mounted) return;
+      final overlaps = existing.docs.any((doc) {
+        final data = doc.data();
+        final start = (data['startMinutes'] as num?)?.round() ?? 0;
+        final end = start + ((data['durationMinutes'] as num?)?.round() ?? 0);
+        return draft.startMinutes < end &&
+            draft.startMinutes + draft.durationMinutes > start;
+      });
+      if (overlaps) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That time overlaps another block.')),
+        );
+        return;
+      }
+      await service.createScheduleEvent(
+        userId: userId,
+        title: draft.title,
+        category: draft.category,
+        date: draft.date,
+        startMinutes: draft.startMinutes,
+        durationMinutes: draft.durationMinutes,
+        notes: draft.notes,
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Time block added.')));
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Home quick plan save failed: $error\n$stackTrace');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save this time block. Retry.'),
+          ),
+        );
+      }
+    }
   }
 
   static String _readString(dynamic value, {required String fallback}) {
@@ -314,23 +318,6 @@ class HomeScreen extends StatelessWidget {
     }
 
     return fallback;
-  }
-
-  static double _calculateWorkHours(String startTime, String endTime) {
-    final start = _parseTime(startTime);
-    final end = _parseTime(endTime);
-
-    if (start == null || end == null) {
-      return 8;
-    }
-
-    var difference = end - start;
-
-    if (difference <= 0) {
-      difference += 24;
-    }
-
-    return difference;
   }
 
   static double? _parseTime(String value) {
@@ -369,7 +356,7 @@ class HomeScreen extends StatelessWidget {
     String userId, {
     DocumentSnapshot<Map<String, dynamic>>? existingActivity,
     String? initialTitle,
-    String initialCategory = 'Personal',
+    String initialCategory = 'Life',
     DateTime? initialDate,
   }) async {
     final savedDate = await showDialog<DateTime>(
@@ -485,77 +472,6 @@ class HomeScreen extends StatelessWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not delete activity.')),
-        );
-      }
-    }
-  }
-
-  static Future<void> _showSleepDialog(
-    BuildContext context,
-    String userId,
-    double? currentHours,
-  ) async {
-    var selectedHours = currentHours ?? 8;
-    final hours = await showDialog<double>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          backgroundColor: AppColors.ivory,
-          title: Text(
-            'Set your sleep target',
-            style: GoogleFonts.fraunces(
-              fontSize: 22,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '${selectedHours.toStringAsFixed(selectedHours % 1 == 0 ? 0 : 1)} hours',
-                style: GoogleFonts.fraunces(fontSize: 25, color: AppColors.ink),
-              ),
-              Slider(
-                value: selectedHours,
-                min: 0,
-                max: 12,
-                divisions: 24,
-                activeColor: AppColors.clay,
-                onChanged: (value) => setState(() => selectedHours = value),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(selectedHours),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (hours == null || !context.mounted) return;
-
-    try {
-      await FirestoreService().updateSleepHours(
-        userId: userId,
-        sleepHours: hours,
-      );
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Sleep target saved.')));
-      }
-    } catch (error, stackTrace) {
-      debugPrint('Sleep target update failed: $error\n$stackTrace');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save sleep target.')),
         );
       }
     }
@@ -752,7 +668,7 @@ class _ActivityDialog extends StatefulWidget {
     required this.userId,
     this.existingActivity,
     this.initialTitle,
-    this.initialCategory = 'Personal',
+    this.initialCategory = 'Life',
     this.initialDate,
   });
 
@@ -761,14 +677,7 @@ class _ActivityDialog extends StatefulWidget {
 }
 
 class _ActivityDialogState extends State<_ActivityDialog> {
-  static const _categories = [
-    'Work',
-    'Health',
-    'Personal',
-    'Leisure',
-    'Learning',
-    'Other',
-  ];
+  static const _categories = ['Work', 'Commute', 'Sleep', 'Rest', 'Life'];
 
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _titleController;
@@ -776,6 +685,7 @@ class _ActivityDialogState extends State<_ActivityDialog> {
   late final TextEditingController _durationController;
   late String _category;
   late DateTime _date;
+  String? _scheduleEventId;
   bool _isSaving = false;
   String? _saveError;
 
@@ -794,12 +704,13 @@ class _ActivityDialogState extends State<_ActivityDialog> {
     _durationController = TextEditingController(
       text: data['durationMinutes']?.toString() ?? '',
     );
-    final storedCategory =
-        data['category']?.toString() ?? widget.initialCategory;
-    _category = _categories.contains(storedCategory)
-        ? storedCategory
-        : 'Personal';
+    final savedCategory = data['category']?.toString();
+    final storedCategory = _canonicalArea(
+      savedCategory ?? widget.initialCategory,
+    );
+    _category = storedCategory;
     final storedDate = data['date'];
+    _scheduleEventId = data['scheduleEventId']?.toString();
     _date = storedDate is String
         ? HomeScreen._parseDateKey(storedDate)
         : storedDate is Timestamp
@@ -807,6 +718,21 @@ class _ActivityDialogState extends State<_ActivityDialog> {
         : storedDate is DateTime
         ? storedDate
         : widget.initialDate ?? DateTime.now();
+  }
+
+  String _canonicalArea(String category) {
+    switch (category.trim().toLowerCase()) {
+      case 'work':
+        return 'Work';
+      case 'commute':
+        return 'Commute';
+      case 'sleep':
+        return 'Sleep';
+      case 'rest':
+        return 'Rest';
+      default:
+        return 'Life';
+    }
   }
 
   @override
@@ -832,6 +758,18 @@ class _ActivityDialogState extends State<_ActivityDialog> {
       final durationText = _durationController.text.trim();
       final duration = durationText.isEmpty ? 0 : int.parse(durationText);
       final service = FirestoreService();
+      final scheduledEvents = await service
+          .scheduleForDate(widget.userId, _date)
+          .first;
+      if (!scheduledEvents.docs.any((event) => event.id == _scheduleEventId)) {
+        if (mounted) {
+          setState(() {
+            _saveError = 'Choose an activity that is still on this schedule.';
+            _isSaving = false;
+          });
+        }
+        return;
+      }
 
       if (_isEditing) {
         final activity = widget.existingActivity!;
@@ -842,6 +780,7 @@ class _ActivityDialogState extends State<_ActivityDialog> {
           title: title,
           category: _category,
           date: _date,
+          scheduleEventId: _scheduleEventId!,
           notes: _notesController.text.trim(),
           durationMinutes: duration,
           completed: activityData['completed'] == true,
@@ -852,6 +791,7 @@ class _ActivityDialogState extends State<_ActivityDialog> {
           title: title,
           category: _category,
           date: _date,
+          scheduleEventId: _scheduleEventId!,
           notes: _notesController.text.trim(),
           durationMinutes: duration,
         );
@@ -894,7 +834,10 @@ class _ActivityDialogState extends State<_ActivityDialog> {
       lastDate: DateTime.now().add(const Duration(days: 3650)),
     );
     if (selectedDate != null && mounted) {
-      setState(() => _date = selectedDate);
+      setState(() {
+        _date = selectedDate;
+        _scheduleEventId = null;
+      });
     }
   }
 
@@ -934,7 +877,7 @@ class _ActivityDialogState extends State<_ActivityDialog> {
                 const SizedBox(height: 14),
                 DropdownButtonFormField<String>(
                   initialValue: _category,
-                  decoration: const InputDecoration(labelText: 'Category'),
+                  decoration: const InputDecoration(labelText: 'Life area'),
                   items: _categories
                       .map(
                         (item) =>
@@ -964,6 +907,55 @@ class _ActivityDialogState extends State<_ActivityDialog> {
                   ),
                 ),
                 const SizedBox(height: 14),
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirestoreService().scheduleForDate(
+                    widget.userId,
+                    _date,
+                  ),
+                  builder: (context, snapshot) {
+                    final events = snapshot.data?.docs ?? [];
+                    final safeEventId =
+                        events.any((event) => event.id == _scheduleEventId)
+                        ? _scheduleEventId
+                        : null;
+                    return DropdownButtonFormField<String>(
+                      key: ValueKey('schedule-anchor-$_scheduleEventId'),
+                      initialValue: safeEventId,
+                      validator: (value) => value == null
+                          ? 'Link this task to a scheduled activity.'
+                          : null,
+                      decoration: InputDecoration(
+                        labelText: 'Schedule anchor',
+                        helperText: snapshot.hasError
+                            ? 'Schedule unavailable'
+                            : events.isEmpty
+                            ? 'Add a time block to this day’s schedule first.'
+                            : 'Choose what this task belongs to.',
+                      ),
+                      items: events.map((event) {
+                        final data = event.data();
+                        final start = data['startMinutes'] is num
+                            ? (data['startMinutes'] as num).round()
+                            : 0;
+                        final title = data['title']?.toString() ?? 'Activity';
+                        return DropdownMenuItem<String>(
+                          value: event.id,
+                          child: Text(
+                            '${_formatScheduleTime(start)} · $title',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: _isSaving || snapshot.hasError
+                          ? null
+                          : (value) => setState(() {
+                              _scheduleEventId = value;
+                              _saveError = null;
+                            }),
+                    );
+                  },
+                ),
+                const SizedBox(height: 14),
                 TextFormField(
                   controller: _durationController,
                   enabled: !_isSaving,
@@ -975,11 +967,16 @@ class _ActivityDialogState extends State<_ActivityDialog> {
                     if (duration == null || duration < 0) {
                       return 'Enter a valid non-negative duration.';
                     }
+                    if (duration > 1440) {
+                      return 'Time spent cannot exceed 24 hours for one day.';
+                    }
                     return null;
                   },
                   decoration: const InputDecoration(
-                    labelText: 'Duration',
-                    hintText: 'Minutes',
+                    labelText: 'Time spent (minutes)',
+                    hintText: 'e.g. 45',
+                    helperText:
+                        'Enter actual minutes. Insights counts it once complete.',
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -1165,328 +1162,53 @@ class _CommuteDialogState extends State<_CommuteDialog> {
 class _HomeHeader extends StatelessWidget {
   final String greeting;
   final String name;
-  final String jobTitle;
-  final String company;
   final String dateLabel;
-  final VoidCallback onProfileTap;
 
   const _HomeHeader({
     required this.greeting,
     required this.name,
-    required this.jobTitle,
-    required this.company,
     required this.dateLabel,
-    required this.onProfileTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(text: '$greeting, '),
+                    TextSpan(
+                      text: name,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+                style: GoogleFonts.fraunces(
+                  fontSize: 25,
+                  height: 1.15,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                ),
+              ),
+              const SizedBox(height: 7),
               Text(
-                greeting,
+                dateLabel,
                 style: GoogleFonts.inter(
-                  fontSize: 12,
+                  fontSize: 11.5,
                   fontWeight: FontWeight.w500,
                   color: AppColors.sub,
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                name,
-                style: GoogleFonts.fraunces(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                company.isEmpty ? jobTitle : '$jobTitle · $company',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.inter(fontSize: 11, color: AppColors.sub),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                dateLabel,
-                style: GoogleFonts.inter(fontSize: 10.5, color: AppColors.sub),
-              ),
             ],
-          ),
-        ),
-        Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onProfileTap,
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: AppColors.eucalyptus,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.person_outline,
-                color: AppColors.eucalyptusDark,
-                size: 21,
-              ),
-            ),
           ),
         ),
       ],
-    );
-  }
-}
-
-class _DailySnapshot extends StatelessWidget {
-  final String userId;
-
-  const _DailySnapshot({required this.userId});
-
-  @override
-  Widget build(BuildContext context) {
-    final today = DateTime.now();
-
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirestoreService().dailyCheckIn(userId, today),
-      builder: (context, checkInSnapshot) {
-        final checkInData = checkInSnapshot.data?.data();
-
-        final energy = checkInData?['energyScore'];
-
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: FirestoreService().activeGoals(userId),
-          builder: (context, goalSnapshot) {
-            final goals = goalSnapshot.data?.docs ?? [];
-
-            final todayKey = _dateKey(today);
-
-            final todayGoals = goals.where((goal) {
-              return goal.data()['date']?.toString() == todayKey;
-            }).toList();
-
-            final completedGoals = todayGoals.where((goal) {
-              return goal.data()['completed'] == true;
-            }).length;
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: _SnapshotCard(
-                        icon: Icons.bolt_outlined,
-                        label: 'Energy',
-                        value: checkInSnapshot.hasError
-                            ? '—'
-                            : !checkInSnapshot.hasData
-                            ? '…'
-                            : energy is num
-                            ? '${energy.round()}/10'
-                            : '—',
-                        subtitle: checkInSnapshot.hasError
-                            ? 'Could not load'
-                            : !checkInSnapshot.hasData
-                            ? 'Loading'
-                            : energy is num
-                            ? 'Logged · tap to update'
-                            : 'Not logged · tap to check in',
-                        onTap:
-                            checkInSnapshot.hasError || !checkInSnapshot.hasData
-                            ? null
-                            : () => HomeScreen._showEnergyCheckInDialog(
-                                context,
-                                userId,
-                                currentScore: energy is num
-                                    ? energy.round()
-                                    : null,
-                              ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _SnapshotCard(
-                        icon: Icons.flag_outlined,
-                        label: "Today's focus",
-                        value: goalSnapshot.hasError
-                            ? '—'
-                            : !goalSnapshot.hasData
-                            ? '…'
-                            : todayGoals.isEmpty
-                            ? '0'
-                            : '$completedGoals/${todayGoals.length}',
-                        subtitle: goalSnapshot.hasError
-                            ? 'Could not load'
-                            : !goalSnapshot.hasData
-                            ? 'Loading'
-                            : todayGoals.isEmpty
-                            ? 'Tap to set a focus'
-                            : completedGoals == todayGoals.length
-                            ? 'All complete'
-                            : 'Tap to add a focus',
-                        onTap: goalSnapshot.hasError
-                            ? null
-                            : () => Navigator.of(context).pushReplacement(
-                                MaterialPageRoute(
-                                  builder: (_) => const GoalsScreen(),
-                                ),
-                              ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (goalSnapshot.hasError)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 10),
-                    child: _HomeLoadError(
-                      message: 'Today’s focus could not be loaded.',
-                    ),
-                  )
-                else if (goalSnapshot.hasData && todayGoals.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppColors.line),
-                      ),
-                      child: Column(
-                        children: [
-                          for (
-                            var index = 0;
-                            index < todayGoals.length;
-                            index++
-                          )
-                            CheckboxListTile(
-                              dense: true,
-                              value:
-                                  todayGoals[index].data()['completed'] == true,
-                              activeColor: AppColors.eucalyptusDark,
-                              controlAffinity: ListTileControlAffinity.leading,
-                              title: Text(
-                                todayGoals[index].data()['title']?.toString() ??
-                                    'Daily focus',
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  color: AppColors.ink,
-                                  decoration:
-                                      todayGoals[index].data()['completed'] ==
-                                          true
-                                      ? TextDecoration.lineThrough
-                                      : null,
-                                ),
-                              ),
-                              subtitle: Text(
-                                todayGoals[index]
-                                        .data()['category']
-                                        ?.toString() ??
-                                    'Personal day',
-                                style: GoogleFonts.inter(
-                                  fontSize: 10,
-                                  color: AppColors.sub,
-                                ),
-                              ),
-                              onChanged: (completed) {
-                                if (completed != null) {
-                                  HomeScreen._setGoalCompletion(
-                                    context,
-                                    userId,
-                                    todayGoals[index].id,
-                                    completed,
-                                  );
-                                }
-                              },
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  static String _dateKey(DateTime date) {
-    final year = date.year.toString().padLeft(4, '0');
-    final month = date.month.toString().padLeft(2, '0');
-    final day = date.day.toString().padLeft(2, '0');
-
-    return '$year-$month-$day';
-  }
-}
-
-class _SnapshotCard extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final String subtitle;
-  final VoidCallback? onTap;
-
-  const _SnapshotCard({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.subtitle,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(17),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 15, 14, 14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(17),
-            border: Border.all(color: AppColors.line),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, size: 19, color: AppColors.clayDark),
-              const SizedBox(height: 11),
-              Text(
-                value,
-                style: GoogleFonts.fraunces(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                style: GoogleFonts.inter(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                subtitle,
-                style: GoogleFonts.inter(fontSize: 9.5, color: AppColors.sub),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1504,6 +1226,7 @@ class _EnergyCheckInSectionState extends State<_EnergyCheckInSection> {
   bool _isSaving = false;
   int? _savingScore;
   int _selectedScore = 5;
+  int _retryVersion = 0;
 
   Future<void> _saveEnergy(int score) async {
     if (_isSaving) return;
@@ -1601,11 +1324,13 @@ class _EnergyCheckInSectionState extends State<_EnergyCheckInSection> {
     final today = DateTime.now();
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      key: ValueKey(_retryVersion),
       stream: FirestoreService().dailyCheckIn(widget.userId, today),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return const _HomeLoadError(
+          return _HomeLoadError(
             message: 'Energy check-in could not be loaded.',
+            onRetry: () => setState(() => _retryVersion++),
           );
         }
 
@@ -1710,6 +1435,1066 @@ class _EnergyCheckInSectionState extends State<_EnergyCheckInSection> {
         );
       },
     );
+  }
+}
+
+class _DailyCheckInSection extends StatefulWidget {
+  const _DailyCheckInSection({
+    required this.userId,
+    required this.workdayByRoutine,
+    required this.workStartTime,
+    required this.workEndTime,
+    required this.workdays,
+    required this.commuteMinutes,
+    required this.jobTitle,
+    required this.routineProfileReady,
+    required this.sleepHours,
+    required this.restHours,
+    required this.onEditWork,
+    required this.onEditCommute,
+    required this.onEditRest,
+  });
+
+  final String userId;
+  final bool workdayByRoutine;
+  final String workStartTime;
+  final String workEndTime;
+  final List<String> workdays;
+  final int commuteMinutes;
+  final String jobTitle;
+  final bool routineProfileReady;
+  final double sleepHours;
+  final double restHours;
+  final VoidCallback onEditWork;
+  final VoidCallback onEditCommute;
+  final VoidCallback onEditRest;
+
+  @override
+  State<_DailyCheckInSection> createState() => _DailyCheckInSectionState();
+}
+
+class _DailyCheckInSectionState extends State<_DailyCheckInSection>
+    with WidgetsBindingObserver {
+  static const _moods = [
+    ('great', '😄', 'Great'),
+    ('good', '🙂', 'Good'),
+    ('okay', '😐', 'Okay'),
+    ('off', '😕', 'Off'),
+    ('low', '😞', 'Low'),
+  ];
+
+  Color _moodColor(String mood) => switch (mood) {
+    'great' => const Color(0xFF98A875),
+    'good' => AppColors.eucalyptus,
+    'okay' => const Color(0xFFF4D58D),
+    'off' => const Color(0xFFE99A70),
+    _ => const Color(0xFFE16A60),
+  };
+
+  bool _loaded = false;
+  bool _isSaving = false;
+  bool _isUpdatingWorkStatus = false;
+  DateTime _currentDate = DateUtils.dateOnly(DateTime.now());
+  String? _mood;
+  double _energy = 5;
+  int _sleepStartMinutes = 22 * 60;
+  int _sleepEndMinutes = 6 * 60;
+  int? _lastSavedSleepStartMinutes;
+  int? _lastSavedSleepEndMinutes;
+  DateTime? _pendingWakeAt;
+  bool _pendingWakeIsReanchor = false;
+  bool _workingToday = false;
+  final Map<String, bool> _meals = {
+    'breakfast': false,
+    'lunch': false,
+    'dinner': false,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didUpdateWidget(covariant _DailyCheckInSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.userId != widget.userId ||
+        oldWidget.workdayByRoutine != widget.workdayByRoutine ||
+        oldWidget.routineProfileReady != widget.routineProfileReady ||
+        oldWidget.sleepHours != widget.sleepHours) {
+      _loaded = false;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final today = DateUtils.dateOnly(DateTime.now());
+    if (DateUtils.isSameDay(today, _currentDate)) return;
+    setState(() {
+      _currentDate = today;
+      _loaded = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_isSaving || _isUpdatingWorkStatus) return;
+    if (_sleepStartMinutes == _sleepEndMinutes) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Choose different sleep and wake times.')),
+      );
+      return;
+    }
+    setState(() => _isSaving = true);
+    final now = _currentDate;
+    final service = FirestoreService();
+    try {
+      final currentWindow = await service
+          .currentBalanceWindowDocument(widget.userId)
+          .get();
+      final currentWindowData = currentWindow.data() ?? <String, dynamic>{};
+      final currentEndValue = currentWindowData['endAt'];
+      final currentEnd = currentEndValue is Timestamp
+          ? currentEndValue.toDate()
+          : null;
+      final hasActiveWindow =
+          currentWindowData['status'] == 'active' &&
+          currentEnd != null &&
+          DateTime.now().isBefore(currentEnd);
+      if (!hasActiveWindow && _pendingWakeAt == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Confirm your actual wake-up time to start a new 24-hour window.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+      if (hasActiveWindow && _pendingWakeAt != null && _pendingWakeIsReanchor) {
+        await service.reanchorBalanceWindow(
+          userId: widget.userId,
+          wakeAt: _pendingWakeAt!,
+        );
+      } else if (!hasActiveWindow) {
+        await service.startBalanceWindow(
+          userId: widget.userId,
+          wakeAt: _pendingWakeAt!,
+        );
+      }
+      await service.saveDailyCheckIn(
+        userId: widget.userId,
+        date: now,
+        energyScore: _energy.round(),
+        mealStatus: Map<String, bool>.from(_meals),
+        sleepStartMinutes: _sleepStartMinutes,
+        sleepEndMinutes: _sleepEndMinutes,
+        mood: _mood,
+      );
+      await service.saveCurrentBalanceWindowSleep(
+        userId: widget.userId,
+        checkInDate: now,
+        sleepStartMinutes: _sleepStartMinutes,
+        sleepEndMinutes: _sleepEndMinutes,
+      );
+      await service.setWorkStatus(
+        userId: widget.userId,
+        date: now,
+        working: _workingToday,
+      );
+      if (_workingToday) {
+        await service.ensureRoutineScheduleForDate(
+          userId: widget.userId,
+          date: now,
+          workStartTime: widget.workStartTime,
+          workEndTime: widget.workEndTime,
+          workdays: widget.workdays,
+          commuteMinutes: widget.commuteMinutes,
+          jobTitle: widget.jobTitle,
+        );
+      }
+      if (mounted) {
+        setState(() {
+          _lastSavedSleepStartMinutes = _sleepStartMinutes;
+          _lastSavedSleepEndMinutes = _sleepEndMinutes;
+          _pendingWakeAt = null;
+          _pendingWakeIsReanchor = false;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Daily check-in saved.')));
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Daily check-in save failed: $error\n$stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save today’s check-in.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _pickWakeUpTime({
+    DateTime? initial,
+    bool reanchor = false,
+  }) async {
+    final now = DateTime.now();
+    final initialDate = initial ?? now;
+    final selectedDate = await showDatePicker(
+      context: context,
+      initialDate: DateUtils.dateOnly(initialDate),
+      firstDate: DateUtils.dateOnly(now.subtract(const Duration(days: 2))),
+      lastDate: DateUtils.dateOnly(now),
+      helpText: 'Which day did you wake up?',
+    );
+    if (selectedDate == null || !mounted) return;
+    final initialTime = initial == null
+        ? const TimeOfDay(hour: 7, minute: 0)
+        : TimeOfDay.fromDateTime(initial);
+    final selectedTime = await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+      helpText: 'What time did you wake up?',
+    );
+    if (selectedTime == null || !mounted) return;
+    final wakeAt = DateTime(
+      selectedDate.year,
+      selectedDate.month,
+      selectedDate.day,
+      selectedTime.hour,
+      selectedTime.minute,
+    );
+    if (wakeAt.isAfter(DateTime.now())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Wake-up time cannot be in the future.')),
+      );
+      return;
+    }
+    if (!wakeAt.add(const Duration(hours: 24)).isAfter(DateTime.now())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Choose a wake-up time within the last 24 hours.'),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _pendingWakeAt = wakeAt;
+      _pendingWakeIsReanchor = reanchor;
+      _sleepEndMinutes = wakeAt.hour * 60 + wakeAt.minute;
+    });
+  }
+
+  String _formatWakeAt(DateTime value) {
+    final date = MaterialLocalizations.of(context).formatMediumDate(value);
+    final time = MaterialLocalizations.of(
+      context,
+    ).formatTimeOfDay(TimeOfDay.fromDateTime(value));
+    return '$date at $time';
+  }
+
+  Widget _trackingWindowCheckIn() {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirestoreService().currentBalanceWindow(widget.userId),
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data() ?? <String, dynamic>{};
+        final startValue = data['startAt'];
+        final endValue = data['endAt'];
+        final start = startValue is Timestamp ? startValue.toDate() : null;
+        final end = endValue is Timestamp ? endValue.toDate() : null;
+        final active =
+            data['status'] == 'active' &&
+            end != null &&
+            DateTime.now().isBefore(end);
+        final selected = _pendingWakeAt;
+        final description = selected != null
+            ? 'Wake-up: ${_formatWakeAt(selected)}'
+            : active && start != null
+            ? 'Window: ${_formatWakeAt(start)} – ${_formatWakeAt(end)}'
+            : data['status'] == 'complete'
+            ? 'Previous window saved · confirm wake-up'
+            : 'Confirm your wake-up time';
+
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 8, bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.74),
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(color: AppColors.line),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.wb_twilight_outlined,
+                size: 17,
+                color: AppColors.eucalyptusDark,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  description,
+                  style: GoogleFonts.inter(
+                    fontSize: 10.5,
+                    height: 1.35,
+                    color: AppColors.ink,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: _isSaving
+                    ? null
+                    : () => _pickWakeUpTime(
+                        initial: selected ?? (active ? start : null),
+                        reanchor: active,
+                      ),
+                child: Text(
+                  selected != null
+                      ? 'Change'
+                      : active
+                      ? 'Edit'
+                      : 'Confirm',
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _pickSleepTime({required bool isStart}) async {
+    final minutes = isStart ? _sleepStartMinutes : _sleepEndMinutes;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60),
+      helpText: isStart ? 'When do you go to sleep?' : 'When do you wake up?',
+    );
+    if (picked == null || !mounted) return;
+    final selectedMinutes = picked.hour * 60 + picked.minute;
+    setState(() {
+      if (isStart) {
+        _sleepStartMinutes = selectedMinutes;
+      } else {
+        _sleepEndMinutes = selectedMinutes;
+      }
+    });
+  }
+
+  String _formatSleepTime(int minutes) => MaterialLocalizations.of(
+    context,
+  ).formatTimeOfDay(TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60));
+
+  Future<void> _changeWorkStatus(bool working) async {
+    if (_isSaving || _isUpdatingWorkStatus) return;
+    setState(() {
+      _workingToday = working;
+      _isUpdatingWorkStatus = true;
+    });
+    final service = FirestoreService();
+    try {
+      await service.setWorkStatus(
+        userId: widget.userId,
+        date: _currentDate,
+        working: working,
+      );
+      if (working) {
+        await service.ensureRoutineScheduleForDate(
+          userId: widget.userId,
+          date: _currentDate,
+          workStartTime: widget.workStartTime,
+          workEndTime: widget.workEndTime,
+          workdays: widget.workdays,
+          commuteMinutes: widget.commuteMinutes,
+          jobTitle: widget.jobTitle,
+        );
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Work status update failed: $error\n$stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not update today’s work schedule. Try saving the check-in.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUpdatingWorkStatus = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirestoreService().dailyCheckIn(widget.userId, _currentDate),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return _HomeLoadError(
+            message: 'Daily check-in could not be loaded.',
+            onRetry: () => setState(() => _loaded = false),
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 18),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final data = snapshot.data?.data() ?? <String, dynamic>{};
+        if (!_loaded) {
+          _mood = data['mood']?.toString();
+          final savedEnergy = data['energyScore'];
+          _energy = savedEnergy is num
+              ? savedEnergy.toDouble().clamp(1, 10).toDouble()
+              : 5;
+          final status = data['workStatus']?.toString();
+          _workingToday = status == 'working'
+              ? true
+              : status == 'leave'
+              ? false
+              : widget.workdayByRoutine;
+          final sleepStartValue = data['sleepStartMinutes'];
+          final sleepEndValue = data['sleepEndMinutes'];
+          final defaultSleepStart = 22 * 60;
+          final defaultSleepDuration = (widget.sleepHours * 60)
+              .round()
+              .clamp(1, 12 * 60)
+              .toInt();
+          _sleepStartMinutes = sleepStartValue is num
+              ? sleepStartValue.round().clamp(0, 1439).toInt()
+              : defaultSleepStart;
+          _sleepEndMinutes = sleepEndValue is num
+              ? sleepEndValue.round().clamp(0, 1439).toInt()
+              : (defaultSleepStart + defaultSleepDuration) % (24 * 60);
+          _lastSavedSleepStartMinutes = _sleepStartMinutes;
+          _lastSavedSleepEndMinutes = _sleepEndMinutes;
+          final meals = data['mealStatus'];
+          if (meals is Map) {
+            for (final key in _meals.keys) {
+              _meals[key] = meals[key] == true;
+            }
+          }
+          _loaded = true;
+        } else {
+          final savedStart = data['sleepStartMinutes'];
+          final savedEnd = data['sleepEndMinutes'];
+          final localSleepIsUnedited =
+              _sleepStartMinutes == _lastSavedSleepStartMinutes &&
+              _sleepEndMinutes == _lastSavedSleepEndMinutes;
+          if (localSleepIsUnedited && savedStart is num && savedEnd is num) {
+            final nextStart = savedStart.round().clamp(0, 1439).toInt();
+            final nextEnd = savedEnd.round().clamp(0, 1439).toInt();
+            if (nextStart != _sleepStartMinutes ||
+                nextEnd != _sleepEndMinutes) {
+              _sleepStartMinutes = nextStart;
+              _sleepEndMinutes = nextEnd;
+              _lastSavedSleepStartMinutes = nextStart;
+              _lastSavedSleepEndMinutes = nextEnd;
+            }
+          }
+        }
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: AppColors.peach,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.line),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: const Icon(
+                      Icons.wb_sunny_outlined,
+                      color: AppColors.clayDark,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Daily check-in',
+                      style: GoogleFonts.fraunces(
+                        fontSize: 18,
+                        height: 1.15,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 15),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.62),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.7),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'MOOD',
+                      style: GoogleFonts.inter(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: AppColors.clayDark,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 9,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.peach.withValues(alpha: 0.62),
+                        borderRadius: BorderRadius.circular(40),
+                      ),
+                      child: Row(
+                        children: _moods.map((mood) {
+                          final selected = _mood == mood.$1;
+                          return Expanded(
+                            child: Semantics(
+                              button: true,
+                              selected: selected,
+                              label: mood.$3,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(32),
+                                onTap: _isSaving
+                                    ? null
+                                    : () => setState(() => _mood = mood.$1),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 2,
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      AnimatedContainer(
+                                        duration: const Duration(
+                                          milliseconds: 160,
+                                        ),
+                                        width: 47,
+                                        height: 47,
+                                        alignment: Alignment.center,
+                                        decoration: BoxDecoration(
+                                          color: _moodColor(mood.$1),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: selected
+                                                ? AppColors.eucalyptusDark
+                                                : Colors.white.withValues(
+                                                    alpha: 0.9,
+                                                  ),
+                                            width: selected ? 2.5 : 1.5,
+                                          ),
+                                          boxShadow: selected
+                                              ? [
+                                                  BoxShadow(
+                                                    color: AppColors
+                                                        .eucalyptusDark
+                                                        .withValues(
+                                                          alpha: 0.15,
+                                                        ),
+                                                    blurRadius: 5,
+                                                    offset: const Offset(0, 2),
+                                                  ),
+                                                ]
+                                              : null,
+                                        ),
+                                        child: Text(
+                                          mood.$2,
+                                          style: const TextStyle(fontSize: 25),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        mood.$3,
+                                        maxLines: 1,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 9.5,
+                                          fontWeight: selected
+                                              ? FontWeight.w700
+                                              : FontWeight.w500,
+                                          color: selected
+                                              ? AppColors.ink
+                                              : AppColors.clayDark,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    const Divider(height: 1, color: AppColors.line),
+                    const SizedBox(height: 9),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Energy',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.ink,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${_energy.round()} / 10',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.clayDark,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Slider(
+                      value: _energy,
+                      min: 1,
+                      max: 10,
+                      divisions: 9,
+                      activeColor: AppColors.clay,
+                      onChanged: _isSaving
+                          ? null
+                          : (value) => setState(() => _energy = value),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.62),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.7),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'TIME PLAN',
+                      style: GoogleFonts.inter(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: AppColors.clayDark,
+                      ),
+                    ),
+                    _trackingWindowCheckIn(),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      title: Text(
+                        'I’m working today',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink,
+                        ),
+                      ),
+                      subtitle: Text(
+                        _workingToday
+                            ? 'Your usual work blocks are in today’s schedule.'
+                            : 'Today’s work blocks are removed.',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          height: 1.25,
+                          color: AppColors.sub,
+                        ),
+                      ),
+                      value: _workingToday,
+                      activeTrackColor: AppColors.eucalyptusDark,
+                      onChanged: _isSaving || _isUpdatingWorkStatus
+                          ? null
+                          : _changeWorkStatus,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'WORK & COMMUTE',
+                      style: GoogleFonts.inter(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: AppColors.clayDark,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _isSaving ? null : widget.onEditWork,
+                            style: OutlinedButton.styleFrom(
+                              alignment: Alignment.centerLeft,
+                              foregroundColor: AppColors.ink,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 9,
+                              ),
+                              minimumSize: const Size(0, 58),
+                              side: const BorderSide(color: AppColors.line),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.work_outline, size: 16),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        'Work',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${widget.workStartTime}–${widget.workEndTime}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 10,
+                                          color: AppColors.sub,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _isSaving ? null : widget.onEditCommute,
+                            style: OutlinedButton.styleFrom(
+                              alignment: Alignment.centerLeft,
+                              foregroundColor: AppColors.ink,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 9,
+                              ),
+                              minimumSize: const Size(0, 58),
+                              side: const BorderSide(color: AppColors.line),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.directions_transit_outlined,
+                                  size: 16,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        'Commute',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${widget.commuteMinutes} min each way',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 10,
+                                          color: AppColors.sub,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 9),
+                    Text(
+                      'REST & SLEEP',
+                      style: GoogleFonts.inter(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: AppColors.clayDark,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _isSaving ? null : widget.onEditRest,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.ink,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 8,
+                              ),
+                              minimumSize: const Size(0, 68),
+                              side: const BorderSide(color: AppColors.line),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.self_improvement_outlined,
+                                  size: 16,
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  'Rest',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  _formatTargetHours(widget.restHours),
+                                  maxLines: 1,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    color: AppColors.sub,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _isSaving
+                                ? null
+                                : () => _pickSleepTime(isStart: true),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.ink,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 8,
+                              ),
+                              minimumSize: const Size(0, 68),
+                              side: const BorderSide(color: AppColors.line),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.nightlight_outlined, size: 16),
+                                const SizedBox(height: 3),
+                                Text(
+                                  'Sleep',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  _formatSleepTime(_sleepStartMinutes),
+                                  maxLines: 1,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    color: AppColors.sub,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _isSaving
+                                ? null
+                                : () => _pickSleepTime(isStart: false),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.ink,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 8,
+                              ),
+                              minimumSize: const Size(0, 68),
+                              side: const BorderSide(color: AppColors.line),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.wb_sunny_outlined, size: 16),
+                                const SizedBox(height: 3),
+                                Text(
+                                  'Wake',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  _formatSleepTime(_sleepEndMinutes),
+                                  maxLines: 1,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    color: AppColors.sub,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.62),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.7),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'MEALS',
+                      style: GoogleFonts.inter(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: AppColors.clayDark,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 5,
+                      children: [
+                        for (final meal in const [
+                          ('breakfast', 'Breakfast'),
+                          ('lunch', 'Lunch'),
+                          ('dinner', 'Dinner'),
+                        ])
+                          FilterChip(
+                            label: Text(meal.$2),
+                            selected: _meals[meal.$1] == true,
+                            labelStyle: GoogleFonts.inter(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.ink,
+                            ),
+                            visualDensity: VisualDensity.compact,
+                            onSelected: _isSaving
+                                ? null
+                                : (value) =>
+                                      setState(() => _meals[meal.$1] = value),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _isSaving || _isUpdatingWorkStatus ? null : _save,
+                  icon: _isSaving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.check, size: 17),
+                  label: Text(_isSaving ? 'Saving' : 'Save check-in'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _formatTargetHours(double hours) {
+    final value = hours % 1 == 0
+        ? hours.toStringAsFixed(0)
+        : hours.toStringAsFixed(1);
+    return '${value}h';
   }
 }
 
@@ -1930,757 +2715,400 @@ class _EnergyLoggedCard extends StatelessWidget {
   }
 }
 
-class _HomeScheduleSection extends StatelessWidget {
-  final String userId;
-  final double workHours;
-  final int commuteMinutes;
-  final double? sleepHours;
-  final double? restHours;
-  final VoidCallback onRestTap;
-
+class _HomeScheduleSection extends StatefulWidget {
   const _HomeScheduleSection({
     required this.userId,
-    required this.workHours,
+    required this.workStartTime,
+    required this.workEndTime,
+    required this.workdays,
     required this.commuteMinutes,
-    required this.sleepHours,
-    required this.restHours,
-    required this.onRestTap,
+    required this.jobTitle,
+    required this.routineProfileReady,
   });
 
+  final String userId;
+  final String workStartTime;
+  final String workEndTime;
+  final List<String> workdays;
+  final int commuteMinutes;
+  final String jobTitle;
+  final bool routineProfileReady;
+
   @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirestoreService().scheduleForDate(userId, DateTime.now()),
-      builder: (context, snapshot) {
-        final events = snapshot.data?.docs ?? [];
-
-        final sortedEvents = [...events]
-          ..sort((a, b) {
-            final aMinutes = _readInt(a.data()['startMinutes']);
-
-            final bMinutes = _readInt(b.data()['startMinutes']);
-
-            return aMinutes.compareTo(bMinutes);
-          });
-
-        final previewEvents = sortedEvents.take(3).toList();
-
-        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: FirestoreService().activitiesForDate(userId, DateTime.now()),
-          builder: (context, activitySnapshot) {
-            final activities = activitySnapshot.data?.docs ?? [];
-            final completedActivities = activities
-                .where((activity) => activity.data()['completed'] == true)
-                .length;
-            final leisureMinutes = activities
-                .where(
-                  (activity) =>
-                      activity.data()['category']?.toString().toLowerCase() ==
-                      'leisure',
-                )
-                .fold<int>(
-                  0,
-                  (total, activity) =>
-                      total + _readInt(activity.data()['durationMinutes']),
-                );
-            final personalWellnessMinutes = activities
-                .where(
-                  (activity) => const {'personal', 'health'}.contains(
-                    activity.data()['category']?.toString().toLowerCase(),
-                  ),
-                )
-                .fold<int>(
-                  0,
-                  (total, activity) =>
-                      total + _readInt(activity.data()['durationMinutes']),
-                );
-            final sleep = sleepHours ?? 0;
-            final rest = restHours ?? 0;
-            final commuteHours = commuteMinutes * 2 / 60;
-            final flexibleHours = sleepHours == null || restHours == null
-                ? null
-                : (24 - workHours - commuteHours - sleep - rest)
-                      .clamp(0, 24)
-                      .toDouble();
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    const Expanded(
-                      child: _SectionTitle(
-                        title: 'Today at a glance',
-                        subtitle: 'Your time plan, schedule, and activities.',
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(
-                            builder: (_) => const ScheduleScreen(),
-                          ),
-                        );
-                      },
-                      child: Text(
-                        'See all',
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.eucalyptusDark,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                if (activitySnapshot.hasError)
-                  const _HomeLoadError(
-                    message: 'Today’s activity overview could not be loaded.',
-                  )
-                else if (activitySnapshot.connectionState ==
-                        ConnectionState.waiting &&
-                    !activitySnapshot.hasData)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 12),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 15,
-                      vertical: 13,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.eucalyptus,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: _DayOverviewStat(
-                            label: 'Scheduled',
-                            value: snapshot.hasError
-                                ? '—'
-                                : snapshot.hasData
-                                ? '${events.length}'
-                                : '…',
-                          ),
-                        ),
-                        Expanded(
-                          child: _DayOverviewStat(
-                            label: 'Activities',
-                            value: '${activities.length}',
-                          ),
-                        ),
-                        Expanded(
-                          child: _DayOverviewStat(
-                            label: 'Completed',
-                            value: '$completedActivities/${activities.length}',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 10),
-                if (snapshot.hasError)
-                  const _HomeLoadError(
-                    message: 'Your schedule could not be loaded.',
-                  )
-                else if (snapshot.connectionState == ConnectionState.waiting &&
-                    !snapshot.hasData)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (previewEvents.isEmpty)
-                  _EmptyScheduleCard(
-                    onAdd: () {
-                      Navigator.of(context).pushReplacement(
-                        MaterialPageRoute(
-                          builder: (_) => const ScheduleScreen(),
-                        ),
-                      );
-                    },
-                  )
-                else
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: AppColors.line),
-                    ),
-                    child: Column(
-                      children: [
-                        for (var i = 0; i < previewEvents.length; i++)
-                          _ScheduleEventPreview(
-                            data: previewEvents[i].data(),
-                            isLast: i == previewEvents.length - 1,
-                          ),
-                      ],
-                    ),
-                  ),
-                if (!activitySnapshot.hasError && activitySnapshot.hasData) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.line),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'DAY PLAN',
-                          style: GoogleFonts.inter(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.sub,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 14,
-                          runSpacing: 8,
-                          children: [
-                            _DayPlanValue(
-                              label: 'Work',
-                              value: _formatHours(workHours),
-                            ),
-                            _DayPlanValue(
-                              label: 'Commute',
-                              value: _formatHours(commuteHours),
-                            ),
-                            _DayPlanValue(
-                              label: 'Sleep target',
-                              value: sleepHours == null
-                                  ? 'Not set'
-                                  : _formatHours(sleep),
-                            ),
-                            _DayPlanValue(
-                              label: 'Rest target',
-                              value: restHours == null
-                                  ? 'Not set'
-                                  : _formatHours(rest),
-                            ),
-                            _DayPlanValue(
-                              label: 'Side quest',
-                              value: _formatMinutes(leisureMinutes),
-                            ),
-                            _DayPlanValue(
-                              label: 'Personal + wellness',
-                              value: _formatMinutes(personalWellnessMinutes),
-                            ),
-                            _DayPlanValue(
-                              label: 'Flexible, unallocated',
-                              value: flexibleHours == null
-                                  ? 'Set sleep + rest targets'
-                                  : _formatHours(flexibleHours),
-                            ),
-                          ],
-                        ),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            onPressed: onRestTap,
-                            icon: const Icon(
-                              Icons.self_improvement_outlined,
-                              size: 16,
-                            ),
-                            label: Text(
-                              restHours == null
-                                  ? 'Set rest target'
-                                  : 'Update rest target',
-                            ),
-                            style: TextButton.styleFrom(
-                              foregroundColor: AppColors.eucalyptusDark,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                              minimumSize: const Size(44, 40),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 7),
-                        Text(
-                          'Flexible time remains after your work, commute, sleep, and rest targets. None of these targets measures actual rest.',
-                          style: GoogleFonts.inter(
-                            fontSize: 9.5,
-                            color: AppColors.sub,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 20),
-                _HomeActivitiesSection(userId: userId),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  static int _readInt(dynamic value) {
-    if (value is num) {
-      return value.round();
-    }
-
-    return 0;
-  }
-
-  static String _formatHours(double hours) {
-    return '${hours.toStringAsFixed(hours % 1 == 0 ? 0 : 1)}h';
-  }
-
-  static String _formatMinutes(int minutes) {
-    if (minutes <= 0) return 'None planned';
-    if (minutes >= 60) {
-      final hours = minutes ~/ 60;
-      final remainder = minutes % 60;
-      return remainder == 0 ? '${hours}h' : '${hours}h ${remainder}m';
-    }
-    return '${minutes}m';
-  }
+  State<_HomeScheduleSection> createState() => _HomeScheduleSectionState();
 }
 
-class _DayPlanValue extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _DayPlanValue({required this.label, required this.value});
+class _HomeScheduleSectionState extends State<_HomeScheduleSection>
+    with WidgetsBindingObserver {
+  late Stream<QuerySnapshot<Map<String, dynamic>>> _scheduleStream;
+  bool _isSaving = false;
+  DateTime _currentDate = DateUtils.dateOnly(DateTime.now());
 
   @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 136,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            value,
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
-          ),
-          const SizedBox(height: 1),
-          Text(
-            label,
-            style: GoogleFonts.inter(fontSize: 9, color: AppColors.sub),
-          ),
-        ],
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _scheduleStream = _createScheduleStream();
+    if (widget.routineProfileReady) _ensureRoutineSchedule();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final today = DateUtils.dateOnly(DateTime.now());
+    if (DateUtils.isSameDay(today, _currentDate)) return;
+    setState(() {
+      _currentDate = today;
+      _scheduleStream = _createScheduleStream();
+    });
+    _ensureRoutineSchedule();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _HomeScheduleSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.userId != widget.userId ||
+        oldWidget.workStartTime != widget.workStartTime ||
+        oldWidget.workEndTime != widget.workEndTime ||
+        oldWidget.commuteMinutes != widget.commuteMinutes ||
+        oldWidget.jobTitle != widget.jobTitle ||
+        oldWidget.routineProfileReady != widget.routineProfileReady ||
+        oldWidget.workdays.join('|') != widget.workdays.join('|')) {
+      if (widget.routineProfileReady) _ensureRoutineSchedule();
+    }
+  }
+
+  Future<void> _ensureRoutineSchedule() async {
+    if (!widget.routineProfileReady) return;
+    try {
+      await FirestoreService().ensureRoutineScheduleForDate(
+        userId: widget.userId,
+        date: _currentDate,
+        workStartTime: widget.workStartTime,
+        workEndTime: widget.workEndTime,
+        workdays: widget.workdays,
+        commuteMinutes: widget.commuteMinutes,
+        jobTitle: widget.jobTitle,
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Routine schedule setup failed: $error\n$stackTrace');
+    }
+  }
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> _createScheduleStream() {
+    return FirestoreService().scheduleForDate(widget.userId, _currentDate);
+  }
+
+  void _retrySchedule() {
+    setState(() => _scheduleStream = _createScheduleStream());
+    _ensureRoutineSchedule();
+  }
+
+  int _suggestedStartMinutes() {
+    final now = DateTime.now();
+    final currentMinutes = now.hour * 60 + now.minute;
+    return (((currentMinutes + 14) ~/ 15) * 15).clamp(0, 1410).toInt();
+  }
+
+  Future<void> _editEvent({
+    QueryDocumentSnapshot<Map<String, dynamic>>? event,
+    String? initialTitle,
+  }) async {
+    if (_isSaving) return;
+
+    final draft = await showDialog<ScheduleEventDraft>(
+      context: context,
+      builder: (_) => ScheduleEventDialog(
+        date: _currentDate,
+        existing: event,
+        initialTitle: initialTitle,
+        initialCategory: 'Life',
+        initialStartMinutes: _suggestedStartMinutes(),
+        allowDateChange: false,
       ),
     );
+    if (draft == null || !mounted) return;
+
+    setState(() => _isSaving = true);
+    try {
+      final service = FirestoreService();
+      final currentEvents = await service
+          .scheduleForDate(widget.userId, draft.date)
+          .first;
+      if (!mounted) return;
+
+      QueryDocumentSnapshot<Map<String, dynamic>>? conflict;
+      for (final current in currentEvents.docs) {
+        if (current.id == event?.id) continue;
+        final data = current.data();
+        final start = data['startMinutes'] is num
+            ? (data['startMinutes'] as num).round()
+            : 0;
+        final end =
+            start +
+            (data['durationMinutes'] is num
+                ? (data['durationMinutes'] as num).round()
+                : 0);
+        final newEnd = draft.startMinutes + draft.durationMinutes;
+        if (draft.startMinutes < end && newEnd > start) {
+          conflict = current;
+          break;
+        }
+      }
+
+      if (conflict != null) {
+        final conflictingTitle =
+            conflict.data()['title']?.toString() ?? 'Another block';
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            backgroundColor: AppColors.ivory,
+            title: Text(
+              'That time is already planned',
+              style: GoogleFonts.fraunces(
+                fontSize: 21,
+                fontWeight: FontWeight.w600,
+                color: AppColors.ink,
+              ),
+            ),
+            content: Text(
+              '“$conflictingTitle” overlaps this block. Choose another time or duration.',
+              style: GoogleFonts.inter(fontSize: 13, color: AppColors.sub),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Adjust time'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      if (event == null) {
+        await service.createScheduleEvent(
+          userId: widget.userId,
+          title: draft.title,
+          category: draft.category,
+          date: draft.date,
+          startMinutes: draft.startMinutes,
+          durationMinutes: draft.durationMinutes,
+          notes: draft.notes,
+        );
+      } else {
+        await service.updateScheduleEvent(
+          userId: widget.userId,
+          eventId: event.id,
+          title: draft.title,
+          category: draft.category,
+          date: draft.date,
+          startMinutes: draft.startMinutes,
+          durationMinutes: draft.durationMinutes,
+          notes: draft.notes,
+        );
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              event == null ? 'Time block added.' : 'Time block updated.',
+            ),
+          ),
+        );
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Home schedule save failed: $error\n$stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save this time block. Please retry.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
-}
 
-class _DayOverviewStat extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _DayOverviewStat({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          value,
+  Future<void> _deleteEvent(
+    QueryDocumentSnapshot<Map<String, dynamic>> event,
+  ) async {
+    if (_isSaving) return;
+    final title = event.data()['title']?.toString() ?? 'Time block';
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.ivory,
+        title: Text(
+          'Delete this time block?',
           style: GoogleFonts.fraunces(
-            fontSize: 19,
+            fontSize: 21,
             fontWeight: FontWeight.w600,
             color: AppColors.ink,
           ),
         ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: GoogleFonts.inter(fontSize: 9.5, color: AppColors.sub),
-        ),
-      ],
-    );
-  }
-}
-
-class _ScheduleEventPreview extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final bool isLast;
-
-  const _ScheduleEventPreview({required this.data, required this.isLast});
-
-  @override
-  Widget build(BuildContext context) {
-    final startMinutes = data['startMinutes'] is num
-        ? (data['startMinutes'] as num).round()
-        : 0;
-
-    final title = data['title']?.toString() ?? 'Untitled event';
-    final category = data['category']?.toString() ?? 'Other';
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 64,
-            child: Text(
-              _formatMinutes(startMinutes),
-              style: GoogleFonts.inter(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.sub,
-              ),
-            ),
+        content: Text('“$title” will be removed from today’s plan.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep it'),
           ),
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: _categoryBackground(category),
-              borderRadius: BorderRadius.circular(9),
-            ),
-            child: Icon(
-              _categoryIcon(category),
-              size: 16,
-              color: AppColors.clayDark,
-            ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  category,
-                  style: GoogleFonts.inter(fontSize: 10, color: AppColors.sub),
-                ),
-              ],
-            ),
-          ),
-          if (!isLast) const SizedBox.shrink(),
         ],
       ),
     );
-  }
+    if (confirm != true || !mounted) return;
 
-  static String _formatMinutes(int totalMinutes) {
-    final hour24 = (totalMinutes ~/ 60).clamp(0, 23);
-    final minute = totalMinutes % 60;
-
-    final period = hour24 >= 12 ? 'PM' : 'AM';
-    final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
-
-    return '$hour12:${minute.toString().padLeft(2, '0')} $period';
-  }
-
-  static IconData _categoryIcon(String category) {
-    switch (category.toLowerCase()) {
-      case 'work':
-        return Icons.work_outline;
-      case 'health':
-        return Icons.favorite_border;
-      case 'personal':
-        return Icons.person_outline;
-      case 'leisure':
-        return Icons.spa_outlined;
-      case 'learning':
-        return Icons.menu_book_outlined;
-      default:
-        return Icons.event_outlined;
-    }
-  }
-
-  static Color _categoryBackground(String category) {
-    switch (category.toLowerCase()) {
-      case 'work':
-        return AppColors.peach;
-      case 'health':
-        return AppColors.eucalyptus;
-      default:
-        return AppColors.peach;
-    }
-  }
-}
-
-class _EmptyScheduleCard extends StatelessWidget {
-  final VoidCallback onAdd;
-
-  const _EmptyScheduleCard({required this.onAdd});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.line),
-      ),
-      child: Column(
-        children: [
-          const Icon(
-            Icons.calendar_today_outlined,
-            size: 26,
-            color: AppColors.clayDark,
+    setState(() => _isSaving = true);
+    try {
+      await FirestoreService().deleteScheduleEvent(
+        userId: widget.userId,
+        eventId: event.id,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Time block deleted.')));
+      }
+    } catch (error, stackTrace) {
+      debugPrint('Home schedule delete failed: $error\n$stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not delete this time block. Please retry.'),
           ),
-          const SizedBox(height: 10),
-          Text(
-            'Nothing scheduled yet',
-            style: GoogleFonts.inter(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Add something to your schedule to see it here.',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(fontSize: 10.5, color: AppColors.sub),
-          ),
-          const SizedBox(height: 12),
-          TextButton(onPressed: onAdd, child: const Text('Open schedule')),
-        ],
-      ),
-    );
-  }
-}
-
-class _HomeActivitiesSection extends StatefulWidget {
-  final String userId;
-
-  const _HomeActivitiesSection({required this.userId});
-
-  @override
-  State<_HomeActivitiesSection> createState() => _HomeActivitiesSectionState();
-}
-
-class _HomeActivitiesSectionState extends State<_HomeActivitiesSection> {
-  DateTime _selectedDate = DateTime.now();
-
-  bool get _isShowingToday {
-    final today = DateTime.now();
-    return _selectedDate.year == today.year &&
-        _selectedDate.month == today.month &&
-        _selectedDate.day == today.day;
-  }
-
-  Future<void> _selectDate() async {
-    final selectedDate = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime(1900),
-      lastDate: DateTime.now().add(const Duration(days: 3650)),
-    );
-    if (selectedDate != null && mounted) {
-      setState(() => _selectedDate = selectedDate);
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirestoreService().activitiesForDate(
-        widget.userId,
-        _selectedDate,
-      ),
+      stream: _scheduleStream,
       builder: (context, snapshot) {
-        final activities = snapshot.data?.docs ?? [];
-        final completedCount = activities
-            .where((item) => item.data()['completed'] == true)
-            .length;
-        final remainingCount = activities.length - completedCount;
-        final progress = activities.isEmpty
-            ? 0.0
-            : completedCount / activities.length;
-
-        final sortedActivities = [...activities]
+        final sortedEvents = [...?snapshot.data?.docs]
           ..sort((a, b) {
-            final aCompleted = a.data()['completed'] == true;
-            final bCompleted = b.data()['completed'] == true;
-
-            if (aCompleted == bCompleted) {
-              return 0;
-            }
-
-            return aCompleted ? 1 : -1;
+            final aStart = a.data()['startMinutes'] is num
+                ? (a.data()['startMinutes'] as num).round()
+                : 0;
+            final bStart = b.data()['startMinutes'] is num
+                ? (b.data()['startMinutes'] as num).round()
+                : 0;
+            return aStart.compareTo(bStart);
           });
-
-        const categoryOrder = [
-          'Work',
-          'Personal',
-          'Health',
-          'Leisure',
-          'Learning',
-          'Other',
-        ];
-        final activityGroups =
-            <String, List<DocumentSnapshot<Map<String, dynamic>>>>{};
-        for (final activity in sortedActivities) {
-          final rawCategory =
-              activity.data()['category']?.toString() ?? 'Other';
-          final category = categoryOrder.firstWhere(
-            (item) => item.toLowerCase() == rawCategory.toLowerCase(),
-            orElse: () => 'Other',
-          );
-          activityGroups.putIfAbsent(category, () => []).add(activity);
-        }
+        final canEdit = snapshot.hasData && !snapshot.hasError && !_isSaving;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: _SectionTitle(
-                    title: _isShowingToday
-                        ? 'Planned activities'
-                        : 'Activities',
-                    subtitle: _isShowingToday
-                        ? 'Grouped by category · check items off as you go.'
-                        : MaterialLocalizations.of(
-                            context,
-                          ).formatMediumDate(_selectedDate),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Choose activity date',
-                  onPressed: _selectDate,
-                  icon: const Icon(Icons.calendar_month_outlined),
-                  color: AppColors.eucalyptusDark,
-                ),
-                if (snapshot.hasData && !snapshot.hasError)
-                  Text(
-                    '$completedCount/${activities.length}',
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.eucalyptusDark,
-                    ),
-                  ),
-              ],
+            _SectionHeader(
+              title: 'Today’s schedule',
+              actionLabel: 'See all',
+              onAction: () => Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const ScheduleScreen()),
+              ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             if (snapshot.hasError)
-              const _HomeLoadError(
-                message: 'Today’s activities could not be loaded.',
-              )
+              _ScheduleRetryCard(onRetry: _retrySchedule)
             else if (snapshot.connectionState == ConnectionState.waiting &&
                 !snapshot.hasData)
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
+                padding: EdgeInsets.symmetric(vertical: 22),
                 child: Center(child: CircularProgressIndicator()),
               )
-            else ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '${activities.length} planned · $remainingCount remaining',
+            else if (sortedEvents.isEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 23,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: AppColors.line),
+                ),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: AppColors.eucalyptus,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.calendar_today_outlined,
+                        color: AppColors.eucalyptusDark,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'No time blocks planned',
                       style: GoogleFonts.inter(
-                        fontSize: 10.5,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Your day is open.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
                         color: AppColors.sub,
                       ),
                     ),
-                  ),
-                  Text(
-                    '${(progress * 100).round()}%',
-                    style: GoogleFonts.inter(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.eucalyptusDark,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 7),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(5),
-                child: LinearProgressIndicator(
-                  value: progress,
-                  minHeight: 5,
-                  backgroundColor: AppColors.line,
-                  color: AppColors.eucalyptusDark,
+                  ],
                 ),
-              ),
-              const SizedBox(height: 12),
-              if (sortedActivities.isEmpty)
-                _EmptyActivitiesCard(
-                  onAdd: () async {
-                    final savedDate = await HomeScreen._showActivityDialog(
-                      context,
-                      widget.userId,
-                      initialDate: _selectedDate,
-                    );
-                    if (savedDate != null && mounted) {
-                      setState(() => _selectedDate = savedDate);
-                    }
-                  },
-                )
-              else
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: AppColors.line),
-                  ),
-                  child: Column(
-                    children: [
-                      for (final category in categoryOrder)
-                        if (activityGroups[category]?.isNotEmpty == true) ...[
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                category,
-                                style: GoogleFonts.inter(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.eucalyptusDark,
-                                ),
-                              ),
-                            ),
-                          ),
-                          for (
-                            var index = 0;
-                            index < activityGroups[category]!.length;
-                            index++
-                          )
-                            _ActivityTile(
-                              userId: widget.userId,
-                              activity: activityGroups[category]![index],
-                              isLast:
-                                  category == categoryOrder.last &&
-                                  index == activityGroups[category]!.length - 1,
-                            ),
-                        ],
+              )
+            else
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: AppColors.line),
+                ),
+                child: Column(
+                  children: [
+                    for (
+                      var index = 0;
+                      index < sortedEvents.length;
+                      index++
+                    ) ...[
+                      _HomeScheduleRow(
+                        event: sortedEvents[index],
+                        enabled: canEdit,
+                        onEdit: () => _editEvent(event: sortedEvents[index]),
+                        onDelete: () => _deleteEvent(sortedEvents[index]),
+                      ),
+                      if (index < sortedEvents.length - 1)
+                        const Divider(
+                          height: 1,
+                          indent: 15,
+                          endIndent: 15,
+                          color: AppColors.line,
+                        ),
                     ],
-                  ),
+                  ],
                 ),
-            ],
+              ),
           ],
         );
       },
@@ -2688,15 +3116,207 @@ class _HomeActivitiesSectionState extends State<_HomeActivitiesSection> {
   }
 }
 
+class _HomeScheduleRow extends StatelessWidget {
+  final QueryDocumentSnapshot<Map<String, dynamic>> event;
+  final bool enabled;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _HomeScheduleRow({
+    required this.event,
+    required this.enabled,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final data = event.data();
+    final rawStart = data['startMinutes'];
+    final start = rawStart is num ? rawStart.round().clamp(0, 1439).toInt() : 0;
+    final rawDuration = data['durationMinutes'];
+    final duration = rawDuration is num ? rawDuration.round() : 0;
+    final category = _canonicalAreaName(data['category']?.toString() ?? 'Life');
+    final title = data['title']?.toString() ?? 'Untitled block';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 68,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _formatPlanTime(start),
+                  style: GoogleFonts.inter(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.eucalyptusDark,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '$duration min',
+                  style: GoogleFonts.inter(
+                    fontSize: 10.5,
+                    color: AppColors.sub,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: 4,
+            height: 38,
+            decoration: BoxDecoration(
+              color: _planCategoryColor(category),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: InkWell(
+              onTap: enabled ? onEdit : null,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      category,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 11.5,
+                        color: AppColors.sub,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Edit time block',
+            onPressed: enabled ? onEdit : null,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+            padding: EdgeInsets.zero,
+            icon: const Icon(Icons.edit_outlined, size: 17),
+            color: AppColors.eucalyptusDark,
+          ),
+          IconButton(
+            tooltip: 'Delete time block',
+            onPressed: enabled ? onDelete : null,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+            padding: EdgeInsets.zero,
+            icon: const Icon(Icons.delete_outline, size: 17),
+            color: AppColors.clayDark,
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _formatPlanTime(int totalMinutes) {
+    final hour24 = totalMinutes ~/ 60;
+    final minute = totalMinutes % 60;
+    final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+    final period = hour24 < 12 ? 'AM' : 'PM';
+    return '$hour12:${minute.toString().padLeft(2, '0')} $period';
+  }
+
+  static Color _planCategoryColor(String category) {
+    switch (category.toLowerCase()) {
+      case 'work':
+        return AppColors.clayDark;
+      case 'commute':
+        return AppColors.clay.withValues(alpha: 0.7);
+      case 'sleep':
+        return AppColors.pistachio;
+      case 'rest':
+      case 'life':
+        return AppColors.eucalyptusDark;
+      default:
+        return AppColors.eucalyptusDark;
+    }
+  }
+}
+
+String _canonicalAreaName(String category) =>
+    switch (category.trim().toLowerCase()) {
+      'work' => 'Work',
+      'commute' => 'Commute',
+      'sleep' => 'Sleep',
+      'rest' => 'Rest',
+      'meals' => 'Meals',
+      _ => 'Life',
+    };
+
+String _formatScheduleTime(int totalMinutes) {
+  final hour24 = totalMinutes ~/ 60;
+  final minute = totalMinutes % 60;
+  final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+  final period = hour24 < 12 ? 'AM' : 'PM';
+  return '$hour12:${minute.toString().padLeft(2, '0')} $period';
+}
+
+class _ScheduleRetryCard extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _ScheduleRetryCard({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_outlined, color: AppColors.clayDark),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Today’s plan could not be loaded. Your saved records are unchanged.',
+              style: TextStyle(color: AppColors.sub),
+            ),
+          ),
+          TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
+      ),
+    );
+  }
+}
+
 class _ActivityTile extends StatelessWidget {
   final String userId;
   final DocumentSnapshot<Map<String, dynamic>> activity;
-  final bool isLast;
+  final String? linkedScheduleTitle;
 
   const _ActivityTile({
     required this.userId,
     required this.activity,
-    required this.isLast,
+    required this.linkedScheduleTitle,
   });
 
   @override
@@ -2750,7 +3370,7 @@ class _ActivityTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.inter(
-                      fontSize: 12,
+                      fontSize: 13,
                       fontWeight: FontWeight.w600,
                       color: model.completed ? AppColors.sub : AppColors.ink,
                       decoration: model.completed
@@ -2761,30 +3381,45 @@ class _ActivityTile extends StatelessWidget {
                   const SizedBox(height: 3),
                   Row(
                     children: [
-                      Text(
-                        model.category,
-                        style: GoogleFonts.inter(
-                          fontSize: 9.5,
-                          color: AppColors.sub,
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.eucalyptus.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          _canonicalAreaName(model.category),
+                          style: GoogleFonts.inter(
+                            fontSize: 10,
+                            color: AppColors.eucalyptusDark,
+                          ),
                         ),
                       ),
                       if (model.durationMinutes > 0) ...[
                         Text(
                           ' · ',
                           style: GoogleFonts.inter(
-                            fontSize: 9.5,
+                            fontSize: 10.5,
                             color: AppColors.sub,
                           ),
                         ),
                         Text(
                           '${model.durationMinutes} min',
                           style: GoogleFonts.inter(
-                            fontSize: 9.5,
+                            fontSize: 10.5,
                             color: AppColors.sub,
                           ),
                         ),
                       ],
                     ],
+                  ),
+                  const SizedBox(height: 3),
+                  _ScheduleAnchorLabel(
+                    scheduleEventId: data['scheduleEventId']?.toString(),
+                    linkedScheduleTitle: linkedScheduleTitle,
                   ),
                   if (model.notes.isNotEmpty) ...[
                     const SizedBox(height: 3),
@@ -2793,7 +3428,7 @@ class _ActivityTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.inter(
-                        fontSize: 9.5,
+                        fontSize: 10.5,
                         color: AppColors.sub,
                       ),
                     ),
@@ -2834,69 +3469,437 @@ class _ActivityTile extends StatelessWidget {
   }
 }
 
-class _EmptyActivitiesCard extends StatelessWidget {
-  final VoidCallback onAdd;
+class _TodayChecklistSection extends StatefulWidget {
+  const _TodayChecklistSection({required this.userId});
 
-  const _EmptyActivitiesCard({required this.onAdd});
+  final String userId;
+
+  @override
+  State<_TodayChecklistSection> createState() => _TodayChecklistSectionState();
+}
+
+class _TodayChecklistSectionState extends State<_TodayChecklistSection> {
+  int _retryVersion = 0;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 22),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.line),
+    final today = DateTime.now();
+    final todayKey =
+        '${today.year.toString().padLeft(4, '0')}-'
+        '${today.month.toString().padLeft(2, '0')}-'
+        '${today.day.toString().padLeft(2, '0')}';
+    final service = FirestoreService();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(
+          title: 'Today’s checklist',
+          actionLabel: 'Manage',
+          onAction: () => Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const GoalsScreen()),
+          ),
+        ),
+        const SizedBox(height: 10),
+        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          key: ValueKey('schedule-links-$_retryVersion'),
+          stream: service.scheduleForDate(widget.userId, today),
+          builder: (context, scheduleSnapshot) {
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              key: ValueKey('goals-$_retryVersion'),
+              stream: service.activeGoals(widget.userId),
+              builder: (context, goalsSnapshot) {
+                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  key: ValueKey('activities-$_retryVersion'),
+                  stream: service.activitiesForDate(widget.userId, today),
+                  builder: (context, activitySnapshot) {
+                    if (scheduleSnapshot.hasError ||
+                        goalsSnapshot.hasError ||
+                        activitySnapshot.hasError) {
+                      return _ChecklistError(
+                        onRetry: () => setState(() => _retryVersion++),
+                      );
+                    }
+                    if (!scheduleSnapshot.hasData ||
+                        !goalsSnapshot.hasData ||
+                        !activitySnapshot.hasData) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 20),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+
+                    final scheduleTitles = {
+                      for (final event in scheduleSnapshot.data!.docs)
+                        event.id:
+                            event.data()['title']?.toString() ?? 'Activity',
+                    };
+                    final goals = goalsSnapshot.data!.docs
+                        .where(
+                          (goal) => goal.data()['date']?.toString() == todayKey,
+                        )
+                        .toList();
+                    final activities = activitySnapshot.data!.docs;
+                    final total = goals.length + activities.length;
+                    final done =
+                        goals
+                            .where((goal) => goal.data()['completed'] == true)
+                            .length +
+                        activities
+                            .where(
+                              (activity) =>
+                                  activity.data()['completed'] == true,
+                            )
+                            .length;
+
+                    if (total == 0) {
+                      return Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: AppColors.line),
+                        ),
+                        child: Text(
+                          'Nothing on your checklist yet.',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppColors.sub,
+                          ),
+                        ),
+                      );
+                    }
+
+                    return Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppColors.line),
+                      ),
+                      child: Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 7),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                '$done of $total done',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.eucalyptusDark,
+                                ),
+                              ),
+                            ),
+                          ),
+                          for (final goal in goals)
+                            _GoalChecklistRow(
+                              userId: widget.userId,
+                              goal: goal,
+                              linkedScheduleTitle:
+                                  scheduleTitles[goal
+                                      .data()['scheduleEventId']
+                                      ?.toString()],
+                            ),
+                          for (final activity in activities)
+                            _ActivityTile(
+                              userId: widget.userId,
+                              activity: activity,
+                              linkedScheduleTitle:
+                                  scheduleTitles[activity
+                                      .data()['scheduleEventId']
+                                      ?.toString()],
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _GoalChecklistRow extends StatelessWidget {
+  const _GoalChecklistRow({
+    required this.userId,
+    required this.goal,
+    required this.linkedScheduleTitle,
+  });
+
+  final String userId;
+  final QueryDocumentSnapshot<Map<String, dynamic>> goal;
+  final String? linkedScheduleTitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = goal.data();
+    final completed = data['completed'] == true;
+    final scheduleEventId = data['scheduleEventId']?.toString();
+    return CheckboxListTile(
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+      value: completed,
+      activeColor: AppColors.eucalyptusDark,
+      controlAffinity: ListTileControlAffinity.leading,
+      title: Text(
+        data['title']?.toString() ?? 'Daily focus',
+        style: GoogleFonts.inter(
+          fontSize: 13,
+          color: completed ? AppColors.sub : AppColors.ink,
+          decoration: completed ? TextDecoration.lineThrough : null,
+        ),
       ),
-      child: Column(
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppColors.eucalyptus,
-              borderRadius: BorderRadius.circular(15),
-            ),
-            child: const Icon(
-              Icons.checklist_outlined,
-              color: AppColors.eucalyptusDark,
-              size: 23,
-            ),
+          _AreaLabel(category: data['category']?.toString() ?? 'Life'),
+          Row(
+            children: [
+              Expanded(
+                child: _ScheduleAnchorLabel(
+                  scheduleEventId: scheduleEventId,
+                  linkedScheduleTitle: linkedScheduleTitle,
+                ),
+              ),
+              if (scheduleEventId == null ||
+                  scheduleEventId.isEmpty ||
+                  linkedScheduleTitle == null)
+                TextButton(
+                  onPressed: () => _linkToSchedule(context, data),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    minimumSize: const Size(44, 28),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Link'),
+                ),
+            ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            'Your day starts here',
-            style: GoogleFonts.fraunces(
-              fontSize: 19,
-              fontWeight: FontWeight.w600,
-              color: AppColors.ink,
-            ),
+        ],
+      ),
+      onChanged: (value) {
+        if (value != null) {
+          HomeScreen._setGoalCompletion(context, userId, goal.id, value);
+        }
+      },
+    );
+  }
+
+  Future<void> _linkToSchedule(
+    BuildContext context,
+    Map<String, dynamic> data,
+  ) async {
+    final date = HomeScreen._parseDateKey(data['date']?.toString() ?? '');
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.ivory,
+        title: const Text('Link this focus'),
+        content: SizedBox(
+          width: 340,
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirestoreService().scheduleForDate(userId, date),
+            builder: (context, snapshot) {
+              final events = snapshot.data?.docs ?? [];
+              if (snapshot.hasError) {
+                return const Text('Could not load this day’s schedule.');
+              }
+              if (!snapshot.hasData) {
+                return const Padding(
+                  padding: EdgeInsets.all(18),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (events.isEmpty) {
+                return const Text(
+                  'Add a time block to this day’s schedule first.',
+                );
+              }
+              return ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final event in events)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        event.data()['title']?.toString() ?? 'Activity',
+                      ),
+                      onTap: () => Navigator.of(dialogContext).pop(event.id),
+                    ),
+                ],
+              );
+            },
           ),
-          const SizedBox(height: 5),
-          Text(
-            'Add your first activity and check things off as you go.',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 10.5,
-              height: 1.45,
-              color: AppColors.sub,
-            ),
-          ),
-          const SizedBox(height: 13),
-          FilledButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add, size: 17),
-            label: const Text('Add first activity'),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.clay,
-              foregroundColor: Colors.white,
-            ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
           ),
         ],
       ),
     );
+    if (selected == null || !context.mounted) return;
+    try {
+      await FirestoreService().linkGoalToScheduleEvent(
+        userId: userId,
+        goalId: goal.id,
+        scheduleEventId: selected,
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Goal schedule link failed: $error\n$stackTrace');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not link this focus.')),
+        );
+      }
+    }
   }
+}
+
+class _AreaLabel extends StatelessWidget {
+  const _AreaLabel({required this.category});
+
+  final String category;
+
+  @override
+  Widget build(BuildContext context) {
+    final area = switch (category.trim().toLowerCase()) {
+      'work' => 'Work',
+      'commute' => 'Commute',
+      'sleep' => 'Sleep',
+      'rest' => 'Rest',
+      'meals' => 'Meals',
+      _ => 'Life',
+    };
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(top: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(
+          color: AppColors.eucalyptus.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          area,
+          style: GoogleFonts.inter(
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+            color: AppColors.eucalyptusDark,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ScheduleAnchorLabel extends StatelessWidget {
+  const _ScheduleAnchorLabel({
+    required this.scheduleEventId,
+    required this.linkedScheduleTitle,
+  });
+
+  final String? scheduleEventId;
+  final String? linkedScheduleTitle;
+
+  @override
+  Widget build(BuildContext context) {
+    Text label(String text, {bool missing = false}) => Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: GoogleFonts.inter(
+        fontSize: 10.5,
+        color: missing ? AppColors.clayDark : AppColors.sub,
+      ),
+    );
+
+    if (scheduleEventId == null || scheduleEventId!.isEmpty) {
+      return label('Needs a schedule link · tap to edit', missing: true);
+    }
+    if (linkedScheduleTitle == null) {
+      return label('Schedule link missing · tap to edit', missing: true);
+    }
+    return label('Linked to $linkedScheduleTitle');
+  }
+}
+
+class _ChecklistError extends StatelessWidget {
+  const _ChecklistError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: AppColors.line),
+    ),
+    child: Row(
+      children: [
+        const Expanded(
+          child: Text(
+            'Today’s checklist could not be loaded.',
+            style: TextStyle(color: AppColors.sub),
+          ),
+        ),
+        TextButton(onPressed: onRetry, child: const Text('Retry')),
+      ],
+    ),
+  );
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.title,
+    required this.actionLabel,
+    required this.onAction,
+  });
+
+  final String title;
+  final String actionLabel;
+  final VoidCallback onAction;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Expanded(
+        child: Text(
+          title,
+          style: GoogleFonts.fraunces(
+            fontSize: 18,
+            height: 1.2,
+            fontWeight: FontWeight.w600,
+            color: AppColors.ink,
+          ),
+        ),
+      ),
+      TextButton(
+        onPressed: onAction,
+        style: TextButton.styleFrom(
+          foregroundColor: AppColors.clayDark,
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+          minimumSize: const Size(0, 34),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: GoogleFonts.inter(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        child: Text(actionLabel),
+      ),
+    ],
+  );
 }
 
 class _HomeFab extends StatelessWidget {
@@ -2911,45 +3914,17 @@ class _HomeFab extends StatelessWidget {
       backgroundColor: AppColors.clay,
       foregroundColor: Colors.white,
       elevation: 3,
-      tooltip: 'Add activity',
+      tooltip: 'Add to your day',
       child: const Icon(Icons.add),
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  final String title;
-  final String subtitle;
-
-  const _SectionTitle({required this.title, required this.subtitle});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: GoogleFonts.fraunces(
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-            color: AppColors.ink,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          subtitle,
-          style: GoogleFonts.inter(fontSize: 11.5, color: AppColors.sub),
-        ),
-      ],
     );
   }
 }
 
 class _HomeLoadError extends StatelessWidget {
   final String message;
+  final VoidCallback? onRetry;
 
-  const _HomeLoadError({required this.message});
+  const _HomeLoadError({required this.message, this.onRetry});
 
   @override
   Widget build(BuildContext context) {
@@ -2971,231 +3946,219 @@ class _HomeLoadError extends StatelessWidget {
               style: GoogleFonts.inter(fontSize: 11, color: AppColors.sub),
             ),
           ),
+          if (onRetry != null)
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
         ],
       ),
     );
   }
 }
 
-class _TimeOverview extends StatelessWidget {
-  final double workHours;
-  final int commuteMinutes;
-  final double? sleepHours;
-  final VoidCallback onWorkTap;
-  final VoidCallback onCommuteTap;
-  final VoidCallback onSleepTap;
-
-  const _TimeOverview({
-    required this.workHours,
-    required this.commuteMinutes,
-    required this.sleepHours,
-    required this.onWorkTap,
-    required this.onCommuteTap,
-    required this.onSleepTap,
-  });
-
-  String _formatHours(double hours) {
-    if (hours == hours.roundToDouble()) {
-      return '${hours.toInt()}h';
-    }
-
-    return '${hours.toStringAsFixed(1)}h';
-  }
-
-  String _formatCommute(int minutes) {
-    if (minutes >= 60) {
-      final hours = minutes ~/ 60;
-      final remaining = minutes % 60;
-
-      if (remaining == 0) {
-        return '${hours}h';
-      }
-
-      return '${hours}h ${remaining}m';
-    }
-
-    return '${minutes}m';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _TimeTile(
-            icon: Icons.work_outline,
-            label: 'Work',
-            value: _formatHours(workHours),
-            onTap: onWorkTap,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _TimeTile(
-            icon: Icons.directions_car_outlined,
-            label: 'Commute · round trip',
-            value: _formatCommute(commuteMinutes * 2),
-            onTap: onCommuteTap,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _TimeTile(
-            icon: Icons.bed_outlined,
-            label: 'Sleep',
-            value: sleepHours == null ? 'Set' : _formatHours(sleepHours!),
-            onTap: onSleepTap,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _TimeTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final VoidCallback? onTap;
-
-  const _TimeTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 14, 12, 13),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.line),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, size: 18, color: AppColors.clayDark),
-              const SizedBox(height: 12),
-              Text(
-                value,
-                style: GoogleFonts.fraunces(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                style: GoogleFonts.inter(fontSize: 10.5, color: AppColors.sub),
-              ),
-              if (onTap != null)
-                Text(
-                  'Tap to update',
-                  style: GoogleFonts.inter(fontSize: 8.5, color: AppColors.sub),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SideQuestCard extends StatelessWidget {
+class _IdeaForTodayCard extends StatefulWidget {
   final List<String> sideQuests;
   final List<String> customSideQuests;
   final ValueChanged<String> onPlan;
 
-  const _SideQuestCard({
+  const _IdeaForTodayCard({
     required this.sideQuests,
     required this.customSideQuests,
     required this.onPlan,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final allSideQuests = [...sideQuests, ...customSideQuests];
+  State<_IdeaForTodayCard> createState() => _IdeaForTodayCardState();
+}
 
-    final sideQuest = allSideQuests.isNotEmpty
-        ? allSideQuests.first
-        : 'Take a short walk away from your desk.';
+class _IdeaForTodayCardState extends State<_IdeaForTodayCard> {
+  bool _dismissed = false;
+  late final _SideQuestSuggestion _idea;
+
+  static const _suggestions = <_SideQuestSuggestion>[
+    _SideQuestSuggestion(
+      title: 'Make a tiny art piece',
+      description: 'Sketch, collage, or paint for ten playful minutes.',
+      emoji: '🎨',
+      icon: Icons.brush_outlined,
+      background: Color(0xFFE9E4F2),
+      accent: Color(0xFF75688F),
+    ),
+    _SideQuestSuggestion(
+      title: 'Make a three-song playlist',
+      description: 'Pick songs for the mood you want to carry home.',
+      emoji: '🎵',
+      icon: Icons.music_note_rounded,
+      background: Color(0xFFDDEAF0),
+      accent: Color(0xFF527C8A),
+    ),
+    _SideQuestSuggestion(
+      title: 'Learn one dance move',
+      description: 'Put on a favorite track and move around for a song.',
+      emoji: '💃',
+      icon: Icons.motion_photos_on_outlined,
+      background: Color(0xFFF3E0E4),
+      accent: Color(0xFFAC667A),
+    ),
+    _SideQuestSuggestion(
+      title: 'Play outside for a bit',
+      description: 'Shoot hoops, kick a ball, or try a new park route.',
+      emoji: '🏀',
+      icon: Icons.sports_basketball_outlined,
+      background: Color(0xFFF5E7D2),
+      accent: Color(0xFFAE7445),
+    ),
+    _SideQuestSuggestion(
+      title: 'Plan a tiny celebration',
+      description: 'Invite someone for a snack, game, or living-room party.',
+      emoji: '🎉',
+      icon: Icons.celebration_outlined,
+      background: Color(0xFFE5EBD9),
+      accent: Color(0xFF667E52),
+    ),
+    _SideQuestSuggestion(
+      title: 'Try a new recipe twist',
+      description: 'Make a snack with one ingredient you have not tried.',
+      emoji: '🥐',
+      icon: Icons.restaurant_outlined,
+      background: Color(0xFFF3E6D7),
+      accent: Color(0xFF9C704E),
+    ),
+    _SideQuestSuggestion(
+      title: 'Make something by hand',
+      description: 'Fold paper, mend a button, or build a small craft.',
+      emoji: '🧵',
+      icon: Icons.handyman_outlined,
+      background: Color(0xFFE7E4D4),
+      accent: Color(0xFF7F7950),
+    ),
+    _SideQuestSuggestion(
+      title: 'Take a photo walk',
+      description: 'Find three lovely details on a short walk nearby.',
+      emoji: '📷',
+      icon: Icons.photo_camera_outlined,
+      background: Color(0xFFE1E9E1),
+      accent: Color(0xFF5D806B),
+    ),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    final ideas = [..._suggestions];
+    for (var index = 0; index < widget.sideQuests.length; index++) {
+      final title = widget.sideQuests[index];
+      ideas.add(
+        _suggestions[index % _suggestions.length].copyWith(title: title),
+      );
+    }
+    for (var index = 0; index < widget.customSideQuests.length; index++) {
+      final title = widget.customSideQuests[index];
+      ideas.add(
+        _suggestions[(index + 3) % _suggestions.length].copyWith(title: title),
+      );
+    }
+    _idea = ideas[Random().nextInt(ideas.length)];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_dismissed) return const SizedBox.shrink();
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(17),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.peach,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.line),
+        color: _idea.background,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _idea.accent.withValues(alpha: 0.14)),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.auto_awesome_outlined,
-              size: 19,
-              color: AppColors.clayDark,
+          Positioned(
+            right: -4,
+            top: 2,
+            child: Container(
+              width: 86,
+              height: 86,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.48),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(_idea.emoji, style: const TextStyle(fontSize: 39)),
+              ),
             ),
           ),
-          const SizedBox(width: 13),
-          Expanded(
+          Positioned(
+            right: 8,
+            top: 62,
+            child: Icon(
+              _idea.icon,
+              size: 24,
+              color: _idea.accent.withValues(alpha: 0.8),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 84),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'A SMALL IDEA FOR TODAY',
+                  'SIDE QUEST',
                   style: GoogleFonts.inter(
-                    fontSize: 9.5,
+                    fontSize: 10,
                     fontWeight: FontWeight.w700,
-                    letterSpacing: 0.7,
-                    color: AppColors.clayDark,
+                    letterSpacing: 0.9,
+                    color: _idea.accent,
                   ),
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: 7),
                 Text(
-                  sideQuest,
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
+                  _idea.title,
+                  style: GoogleFonts.fraunces(
+                    fontSize: 20,
+                    height: 1.15,
                     fontWeight: FontWeight.w600,
                     color: AppColors.ink,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 5),
                 Text(
-                  'Just a suggestion. Add it to your activities only if you choose.',
-                  style: GoogleFonts.inter(fontSize: 10, color: AppColors.sub),
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton.icon(
-                    onPressed: () => onPlan(sideQuest),
-                    icon: const Icon(Icons.add, size: 16),
-                    label: const Text('Plan this'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppColors.clayDark,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      minimumSize: const Size(44, 40),
-                    ),
+                  _idea.description,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    height: 1.4,
+                    color: AppColors.ink.withValues(alpha: 0.72),
                   ),
                 ),
+                const SizedBox(height: 9),
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: _idea.accent,
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(40, 34),
+                    alignment: Alignment.centerLeft,
+                    textStyle: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  onPressed: () => widget.onPlan(_idea.title),
+                  icon: const Icon(Icons.add, size: 17),
+                  label: const Text('Add to today’s schedule'),
+                ),
               ],
+            ),
+          ),
+          Positioned(
+            right: -10,
+            top: -10,
+            child: IconButton(
+              tooltip: 'Dismiss idea',
+              onPressed: () => setState(() => _dismissed = true),
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.close, size: 18),
+              color: _idea.accent,
             ),
           ),
         ],
@@ -3204,312 +4167,31 @@ class _SideQuestCard extends StatelessWidget {
   }
 }
 
-class _WeeklyOverview extends StatelessWidget {
-  final String userId;
-  final double workHours;
-  final double commuteHours;
-  final int workdayCount;
-  final double? sleepHours;
-  final double? restHours;
-
-  const _WeeklyOverview({
-    required this.userId,
-    required this.workHours,
-    required this.commuteHours,
-    required this.workdayCount,
-    required this.sleepHours,
-    required this.restHours,
+class _SideQuestSuggestion {
+  const _SideQuestSuggestion({
+    required this.title,
+    required this.description,
+    required this.emoji,
+    required this.icon,
+    required this.background,
+    required this.accent,
   });
 
-  String _formatHours(double hours) {
-    if (hours == hours.roundToDouble()) {
-      return '${hours.toInt()}h';
-    }
+  final String title;
+  final String description;
+  final String emoji;
+  final IconData icon;
+  final Color background;
+  final Color accent;
 
-    return '${hours.toStringAsFixed(1)}h';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final today = DateTime.now();
-    final monday = DateTime(
-      today.year,
-      today.month,
-      today.day,
-    ).subtract(Duration(days: today.weekday - 1));
-
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirestoreService().activitiesForWeek(userId, monday),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return const _HomeLoadError(
-            message: 'This week’s activity plan could not be loaded.',
-          );
-        }
-        if (!snapshot.hasData) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 20),
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        final docs = snapshot.data!.docs;
-        int minutesFor(Set<String> categories) => docs
-            .where(
-              (doc) => categories.contains(
-                doc.data()['category']?.toString().toLowerCase(),
-              ),
-            )
-            .fold<int>(
-              0,
-              (total, doc) =>
-                  total + _readMinutes(doc.data()['durationMinutes']),
-            );
-
-        final sideQuestHours = minutesFor({'leisure'}) / 60;
-        final personalHours = minutesFor({'personal', 'health'}) / 60;
-        final sleepWeekHours = sleepHours == null ? null : sleepHours! * 7;
-        final restWeekHours = restHours == null ? null : restHours! * 7;
-        final plannedAwakeHours = sleepWeekHours == null
-            ? null
-            : 168 - sleepWeekHours;
-        final workAndCommuteHours = workHours + commuteHours;
-        final workShare = plannedAwakeHours == null || plannedAwakeHours <= 0
-            ? null
-            : workAndCommuteHours / plannedAwakeHours;
-        final flexibleHours = sleepWeekHours == null || restWeekHours == null
-            ? null
-            : (168 -
-                      workAndCommuteHours -
-                      sleepWeekHours -
-                      restWeekHours -
-                      sideQuestHours -
-                      personalHours)
-                  .clamp(0, 168)
-                  .toDouble();
-        final workHeavy = workShare != null && workShare >= 0.5;
-
-        final suggestion = sleepHours == null || restHours == null
-            ? 'Set both sleep and rest targets to calculate time left after your recovery targets.'
-            : workHeavy
-            ? 'Work and commuting take about ${(workShare * 100).round()}% of planned awake time. Protect a specific personal block and consider reducing or batching commute days where possible.'
-            : sideQuestHours + personalHours == 0
-            ? 'Your routine leaves room outside work, but no personal or wellness activities are planned yet. Add one small activity you would look forward to.'
-            : 'Your planned week leaves about ${_formatHours(flexibleHours!)} unallocated beyond work, commuting, sleep, rest, and logged personal activities. Keep some of that time unscheduled for recovery.';
-
-        final totalLifeHours = sideQuestHours + personalHours;
-        final chartParts = [
-          workHours,
-          commuteHours,
-          sleepWeekHours ?? 0,
-          restWeekHours ?? 0,
-          totalLifeHours,
-          flexibleHours ?? 0,
-        ];
-        final chartFlexes = chartParts
-            .map((hours) => (hours * 10).round().clamp(1, 1680).toInt())
-            .toList();
-
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.line),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: _WeeklyStat(
-                      value: _formatHours(workHours),
-                      label: 'Work',
-                    ),
-                  ),
-                  Expanded(
-                    child: _WeeklyStat(
-                      value: _formatHours(commuteHours),
-                      label: 'Commute',
-                    ),
-                  ),
-                  Expanded(
-                    child: _WeeklyStat(
-                      value: sleepWeekHours == null
-                          ? '—'
-                          : _formatHours(sleepWeekHours),
-                      label: 'Sleep target',
-                    ),
-                  ),
-                  Expanded(
-                    child: _WeeklyStat(
-                      value: restWeekHours == null
-                          ? '—'
-                          : _formatHours(restWeekHours),
-                      label: 'Rest target',
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 18),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: chartFlexes[0],
-                      child: Container(height: 8, color: AppColors.clay),
-                    ),
-                    Expanded(
-                      flex: chartFlexes[1],
-                      child: Container(
-                        height: 8,
-                        color: AppColors.eucalyptusDark,
-                      ),
-                    ),
-                    Expanded(
-                      flex: chartFlexes[2],
-                      child: Container(height: 8, color: AppColors.pistachio),
-                    ),
-                    Expanded(
-                      flex: chartFlexes[3],
-                      child: Container(height: 8, color: AppColors.eucalyptus),
-                    ),
-                    Expanded(
-                      flex: chartFlexes[4],
-                      child: Container(height: 8, color: AppColors.peach),
-                    ),
-                    Expanded(
-                      flex: chartFlexes[5],
-                      child: Container(height: 8, color: AppColors.line),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 12,
-                runSpacing: 5,
-                children: [
-                  _LegendItem(color: AppColors.clay, label: 'Work'),
-                  _LegendItem(
-                    color: AppColors.eucalyptusDark,
-                    label: 'Commute',
-                  ),
-                  _LegendItem(
-                    color: AppColors.pistachio,
-                    label: 'Sleep target',
-                  ),
-                  _LegendItem(
-                    color: AppColors.eucalyptus,
-                    label: 'Rest target',
-                  ),
-                  _LegendItem(color: AppColors.peach, label: 'Logged life'),
-                  _LegendItem(color: AppColors.line, label: 'Unallocated'),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text(
-                workShare == null
-                    ? 'PLANNED WEEK · $workdayCount workdays'
-                    : workHeavy
-                    ? 'WORK-HEAVY PLAN · ${(workShare * 100).round()}% OF AWAKE TIME'
-                    : 'PLANNED TIME HAS ROOM OUTSIDE WORK',
-                style: GoogleFonts.inter(
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w700,
-                  color: workHeavy
-                      ? AppColors.clayDark
-                      : AppColors.eucalyptusDark,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                'Logged this week: ${_formatHours(sideQuestHours)} side quest and ${_formatHours(personalHours)} personal/wellness activities.',
-                style: GoogleFonts.inter(
-                  fontSize: 10.5,
-                  height: 1.4,
-                  color: AppColors.sub,
-                ),
-              ),
-              const SizedBox(height: 7),
-              Text(
-                suggestion,
-                style: GoogleFonts.inter(
-                  fontSize: 10.5,
-                  height: 1.4,
-                  color: AppColors.ink,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                'Work and commute use your usual profile schedule; sleep and rest use your targets. Logged activity durations are user-entered. This is a plan estimate, not a clinical balance score.',
-                style: GoogleFonts.inter(
-                  fontSize: 9.5,
-                  height: 1.35,
-                  color: AppColors.sub,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  static int _readMinutes(dynamic value) => value is num ? value.round() : 0;
-}
-
-class _LegendItem extends StatelessWidget {
-  final Color color;
-  final String label;
-
-  const _LegendItem({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(width: 8, height: 8, color: color),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: GoogleFonts.inter(fontSize: 9, color: AppColors.sub),
-        ),
-      ],
-    );
-  }
-}
-
-class _WeeklyStat extends StatelessWidget {
-  final String value;
-  final String label;
-
-  const _WeeklyStat({required this.value, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: GoogleFonts.fraunces(
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-            color: AppColors.ink,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          label,
-          style: GoogleFonts.inter(fontSize: 10, color: AppColors.sub),
-        ),
-      ],
-    );
-  }
+  _SideQuestSuggestion copyWith({String? title}) => _SideQuestSuggestion(
+    title: title ?? this.title,
+    description: description,
+    emoji: emoji,
+    icon: icon,
+    background: background,
+    accent: accent,
+  );
 }
 
 class _HomeNavigationBar extends StatelessWidget {

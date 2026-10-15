@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/day_allocation_card.dart';
 import '../home/home_screen.dart';
 import '../goals/goals_screen.dart';
 import '../insights/insights_screen.dart';
@@ -22,12 +23,53 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   DateTime _selectedDate = DateTime.now();
   bool _weekView = false;
   bool _isSaving = false;
+  final Set<String> _seededRoutineDays = {};
 
   DateTime get _selectedDay =>
       DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
 
   DateTime get _weekStart =>
       _selectedDay.subtract(Duration(days: _selectedDay.weekday - 1));
+
+  void _seedRoutineForDay(String userId, Map<String, dynamic> profile) {
+    final rawWorkdays = profile['workdays'];
+    if (rawWorkdays is! List) return;
+    final key = '${userId}_${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}';
+    if (!_seededRoutineDays.add(key)) return;
+    _seedRoutine(
+      userId,
+      _selectedDay,
+      _readString(profile['workStartTime'], fallback: '9:00 AM'),
+      _readString(profile['workEndTime'], fallback: '6:00 PM'),
+      _readStringList(rawWorkdays),
+      _readInt(profile['commuteMinutes'], fallback: 0),
+      _readString(profile['jobTitle'], fallback: 'Work'),
+    );
+  }
+
+  Future<void> _seedRoutine(
+    String userId,
+    DateTime date,
+    String start,
+    String end,
+    List<String> workdays,
+    int commuteMinutes,
+    String jobTitle,
+  ) async {
+    try {
+      await FirestoreService().ensureRoutineScheduleForDate(
+        userId: userId,
+        date: date,
+        workStartTime: start,
+        workEndTime: end,
+        workdays: workdays,
+        commuteMinutes: commuteMinutes,
+        jobTitle: jobTitle,
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Routine schedule setup failed: $error\n$stackTrace');
+    }
+  }
 
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
@@ -49,10 +91,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     QueryDocumentSnapshot<Map<String, dynamic>>? event,
   ]) async {
     if (_isSaving) return;
-    final draft = await showDialog<_ScheduleEventDraft>(
+    final draft = await showDialog<ScheduleEventDraft>(
       context: context,
       builder: (_) =>
-          _ScheduleEventDialog(userId: userId, date: date, existing: event),
+          ScheduleEventDialog(date: date, existing: event),
     );
     if (draft == null || !mounted) return;
 
@@ -63,45 +105,46 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           .scheduleForDate(userId, draft.date)
           .first;
       if (!mounted) return;
-      final conflict = currentEvents.docs.any((current) {
-        if (current.id == event?.id) return false;
+      QueryDocumentSnapshot<Map<String, dynamic>>? conflict;
+      for (final current in currentEvents.docs) {
+        if (current.id == event?.id) continue;
         final data = current.data();
         final existingStart = _readInt(data['startMinutes'], fallback: 0);
         final existingEnd =
             existingStart + _readInt(data['durationMinutes'], fallback: 0);
         final newEnd = draft.startMinutes + draft.durationMinutes;
-        return draft.startMinutes < existingEnd && newEnd > existingStart;
-      });
+        if (draft.startMinutes < existingEnd && newEnd > existingStart) {
+          conflict = current;
+          break;
+        }
+      }
 
-      if (conflict) {
-        final continueAnyway = await showDialog<bool>(
+      final conflictingEvent = conflict;
+      if (conflictingEvent != null) {
+        await showDialog<void>(
           context: context,
           builder: (dialogContext) => AlertDialog(
             backgroundColor: AppColors.ivory,
             title: Text(
-              'This overlaps another event',
+              'That time is already planned',
               style: GoogleFonts.fraunces(
                 fontSize: 21,
                 fontWeight: FontWeight.w600,
                 color: AppColors.ink,
               ),
             ),
-            content: const Text(
-              'Save it anyway, or go back and choose another time?',
+            content: Text(
+              '“${conflictingEvent.data()['title'] ?? 'Another block'}” overlaps this time. Choose a different start or shorten the block so the day stays within 24 hours.',
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: const Text('Choose another time'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: const Text('Save anyway'),
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Adjust time'),
               ),
             ],
           ),
         );
-        if (continueAnyway != true || !mounted) return;
+        return;
       }
 
       if (event == null) {
@@ -113,7 +156,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           startMinutes: draft.startMinutes,
           durationMinutes: draft.durationMinutes,
           notes: draft.notes,
-          activityId: draft.activityId,
         );
       } else {
         await service.updateScheduleEvent(
@@ -125,7 +167,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           startMinutes: draft.startMinutes,
           durationMinutes: draft.durationMinutes,
           notes: draft.notes,
-          activityId: draft.activityId,
         );
       }
       if (mounted) {
@@ -243,6 +284,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       stream: FirestoreService().userDocument(user.uid).snapshots(),
       builder: (context, snapshot) {
         final data = snapshot.data?.data() ?? {};
+        if (snapshot.hasData) _seedRoutineForDay(user.uid, data);
 
         final workStartTime = _readString(
           data['workStartTime'],
@@ -257,6 +299,22 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         final workdays = _readStringList(data['workdays']);
 
         final commuteMinutes = _readInt(data['commuteMinutes'], fallback: 60);
+        final dayAbbreviation = const [
+          'Mon',
+          'Tue',
+          'Wed',
+          'Thu',
+          'Fri',
+          'Sat',
+          'Sun',
+        ][_selectedDay.weekday - 1];
+        final isWorkday = workdays.any(
+          (day) =>
+              day.toLowerCase().startsWith(dayAbbreviation.toLowerCase()),
+        );
+        final usualWorkMinutes = isWorkday
+            ? _workDurationMinutes(workStartTime, workEndTime)
+            : 0;
 
         return Scaffold(
           backgroundColor: AppColors.ivory,
@@ -320,6 +378,20 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   _ScheduleDayView(
                     userId: user.uid,
                     date: _selectedDay,
+                    usualWorkMinutes: usualWorkMinutes,
+                    usualCommuteMinutes: isWorkday ? commuteMinutes * 2 : 0,
+                    sleepTargetMinutes:
+                        ((data['sleepHours'] is num
+                                    ? (data['sleepHours'] as num).toDouble()
+                                    : 0) *
+                                60)
+                            .round(),
+                    restTargetMinutes:
+                        ((data['restHours'] is num
+                                    ? (data['restHours'] as num).toDouble()
+                                    : 0) *
+                                60)
+                            .round(),
                     onEventTap: (event) =>
                         _editEvent(user.uid, _selectedDay, event),
                     onEventLongPress: (event) =>
@@ -595,6 +667,10 @@ class _ScheduleCalendarHeader extends StatelessWidget {
 class _ScheduleDayView extends StatelessWidget {
   final String userId;
   final DateTime date;
+  final int usualWorkMinutes;
+  final int usualCommuteMinutes;
+  final int sleepTargetMinutes;
+  final int restTargetMinutes;
   final ValueChanged<QueryDocumentSnapshot<Map<String, dynamic>>> onEventTap;
   final ValueChanged<QueryDocumentSnapshot<Map<String, dynamic>>>
   onEventLongPress;
@@ -603,6 +679,10 @@ class _ScheduleDayView extends StatelessWidget {
   const _ScheduleDayView({
     required this.userId,
     required this.date,
+    required this.usualWorkMinutes,
+    required this.usualCommuteMinutes,
+    required this.sleepTargetMinutes,
+    required this.restTargetMinutes,
     required this.onEventTap,
     required this.onEventLongPress,
     required this.onAdd,
@@ -623,18 +703,26 @@ class _ScheduleDayView extends StatelessWidget {
           );
         }
         final events = snapshot.data!.docs;
-        if (events.isEmpty) {
-          return _ScheduleEmptyState(onAdd: onAdd);
-        }
         return Column(
           children: [
-            for (var index = 0; index < events.length; index++)
-              _TimelineEventTile(
-                event: events[index],
-                isLast: index == events.length - 1,
-                onTap: () => onEventTap(events[index]),
-                onLongPress: () => onEventLongPress(events[index]),
-              ),
+            DayAllocationCard(
+              events: events,
+              usualWorkMinutes: usualWorkMinutes,
+              usualCommuteMinutes: usualCommuteMinutes,
+              sleepTargetMinutes: sleepTargetMinutes,
+              restTargetMinutes: restTargetMinutes,
+            ),
+            const SizedBox(height: 12),
+            if (events.isEmpty)
+              _ScheduleEmptyState(onAdd: onAdd)
+            else
+              for (var index = 0; index < events.length; index++)
+                _TimelineEventTile(
+                  event: events[index],
+                  isLast: index == events.length - 1,
+                  onTap: () => onEventTap(events[index]),
+                  onLongPress: () => onEventLongPress(events[index]),
+                ),
           ],
         );
       },
@@ -806,7 +894,7 @@ class _TimelineEventTile extends StatelessWidget {
     final start = _formatEventTime(_readInt(data['startMinutes']));
     final duration = _readInt(data['durationMinutes']);
     final title = data['title']?.toString() ?? 'Untitled event';
-    final category = data['category']?.toString() ?? 'Other';
+    final category = _displayArea(data['category']?.toString() ?? 'Life');
     final notes = data['notes']?.toString().trim() ?? '';
     final color = _eventColor(category);
 
@@ -898,6 +986,34 @@ String _weekdayName(int weekday) => const [
   'Sunday',
 ][weekday - 1];
 
+int _workDurationMinutes(String startTime, String endTime) {
+  final start = _parseClockMinutes(startTime);
+  final end = _parseClockMinutes(endTime);
+  if (start == null || end == null) return 8 * 60;
+  final duration = end > start ? end - start : end + 1440 - start;
+  return duration.clamp(0, 1440).toInt();
+}
+
+int? _parseClockMinutes(String value) {
+  final match = RegExp(
+    r'^\s*(\d{1,2}):(\d{2})\s*(AM|PM)\s*$',
+    caseSensitive: false,
+  ).firstMatch(value);
+  if (match == null) return null;
+  final hour12 = int.tryParse(match.group(1)!);
+  final minute = int.tryParse(match.group(2)!);
+  if (hour12 == null ||
+      minute == null ||
+      hour12 < 1 ||
+      hour12 > 12 ||
+      minute > 59) {
+    return null;
+  }
+  var hour24 = hour12 % 12;
+  if (match.group(3)!.toUpperCase() == 'PM') hour24 += 12;
+  return hour24 * 60 + minute;
+}
+
 String _formatEventTime(int totalMinutes) {
   final clamped = totalMinutes.clamp(0, 1439);
   final hour24 = clamped ~/ 60;
@@ -910,18 +1026,16 @@ Color _eventColor(String category) {
   switch (category.toLowerCase()) {
     case 'work':
       return AppColors.clayDark;
-    case 'health':
+    case 'commute':
+      return AppColors.clay;
+    case 'sleep':
       return AppColors.eucalyptusDark;
-    case 'family day':
-    case 'personal':
-    case 'personal day':
-      return const Color(0xFF54758A);
-    case 'leisure':
-      return const Color(0xFF8A6545);
-    case 'learning':
-      return const Color(0xFF6C7040);
+    case 'rest':
+    case 'life':
+    case 'meals':
+      return AppColors.eucalyptusDark;
     default:
-      return AppColors.sub;
+      return AppColors.eucalyptusDark;
   }
 }
 
@@ -929,21 +1043,27 @@ IconData _eventIcon(String category) {
   switch (category.toLowerCase()) {
     case 'work':
       return Icons.work_outline;
-    case 'health':
-      return Icons.favorite_border;
-    case 'family day':
-      return Icons.family_restroom_outlined;
-    case 'personal':
-    case 'personal day':
-      return Icons.person_outline;
-    case 'leisure':
-      return Icons.spa_outlined;
-    case 'learning':
-      return Icons.menu_book_outlined;
+    case 'sleep':
+      return Icons.bedtime_outlined;
+    case 'meals':
+      return Icons.restaurant_outlined;
+    case 'rest':
+      return Icons.self_improvement_outlined;
+    case 'commute':
+      return Icons.directions_transit_outlined;
     default:
-      return Icons.event_outlined;
+      return Icons.nature_people_outlined;
   }
 }
+
+String _displayArea(String category) => switch (category.trim().toLowerCase()) {
+  'work' => 'Work',
+  'commute' => 'Commute',
+  'sleep' => 'Sleep',
+  'rest' => 'Rest',
+  'meals' => 'Meals',
+  _ => 'Life',
+};
 
 class _ScheduleEmptyState extends StatelessWidget {
   final VoidCallback onAdd;
@@ -1011,81 +1131,91 @@ class _ScheduleLoadError extends StatelessWidget {
   );
 }
 
-class _ScheduleEventDraft {
+class ScheduleEventDraft {
   final String title;
   final String category;
   final DateTime date;
   final int startMinutes;
   final int durationMinutes;
   final String notes;
-  final String? activityId;
 
-  const _ScheduleEventDraft({
+  const ScheduleEventDraft({
     required this.title,
     required this.category,
     required this.date,
     required this.startMinutes,
     required this.durationMinutes,
     required this.notes,
-    this.activityId,
   });
 }
 
-class _ScheduleEventDialog extends StatefulWidget {
-  final String userId;
+class ScheduleEventDialog extends StatefulWidget {
   final DateTime date;
   final QueryDocumentSnapshot<Map<String, dynamic>>? existing;
+  final String? initialTitle;
+  final String initialCategory;
+  final int? initialStartMinutes;
+  final bool allowDateChange;
 
-  const _ScheduleEventDialog({
-    required this.userId,
+  const ScheduleEventDialog({
+    super.key,
     required this.date,
     this.existing,
+    this.initialTitle,
+    this.initialCategory = 'Life',
+    this.initialStartMinutes,
+    this.allowDateChange = true,
   });
 
   @override
-  State<_ScheduleEventDialog> createState() => _ScheduleEventDialogState();
+  State<ScheduleEventDialog> createState() => _ScheduleEventDialogState();
 }
 
-class _ScheduleEventDialogState extends State<_ScheduleEventDialog> {
-  static const _categories = [
-    'Work',
-    'Personal',
-    'Health',
-    'Leisure',
-    'Learning',
-    'Other',
-  ];
+class _ScheduleEventDialogState extends State<ScheduleEventDialog> {
+  static const _categories = ['Work', 'Commute', 'Sleep', 'Rest', 'Meals', 'Life'];
 
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _title;
-  late final TextEditingController _duration;
   late final TextEditingController _notes;
   late DateTime _date;
   late int _startMinutes;
+  late int _endMinutes;
   late String _category;
-  String? _activityId;
+  bool _invalidTimeRange = false;
 
   @override
   void initState() {
     super.initState();
     final data = widget.existing?.data() ?? {};
-    _title = TextEditingController(text: data['title']?.toString() ?? '');
-    _duration = TextEditingController(
-      text: (data['durationMinutes'] ?? 30).toString(),
+    _title = TextEditingController(
+      text: data['title']?.toString() ?? widget.initialTitle?.trim() ?? '',
     );
     _notes = TextEditingController(text: data['notes']?.toString() ?? '');
     _date = widget.date;
-    _startMinutes = _readInt(data['startMinutes']).clamp(0, 1439);
-    _category = _categories.contains(data['category'])
-        ? data['category'] as String
-        : 'Personal';
-    _activityId = data['activityId']?.toString();
+    final savedStart = data['startMinutes'];
+    _startMinutes = savedStart is num
+        ? savedStart.round().clamp(0, 1439).toInt()
+        : (widget.initialStartMinutes ?? 9 * 60).clamp(0, 1439).toInt();
+    final savedDuration = data['durationMinutes'];
+    final duration = savedDuration is num
+        ? savedDuration.round().clamp(1, 1440).toInt()
+        : 30;
+    _endMinutes = (_startMinutes + duration).clamp(1, 1440).toInt();
+    final storedCategory =
+        data['category']?.toString() ?? widget.initialCategory;
+    _category = switch (storedCategory.trim().toLowerCase()) {
+      'work' => 'Work',
+      'commute' => 'Commute',
+      'sleep' => 'Sleep',
+      'rest' => 'Rest',
+      'meals' => 'Meals',
+      _ => 'Life',
+    };
   }
 
   @override
   void dispose() {
     _title.dispose();
-    _duration.dispose();
     _notes.dispose();
     super.dispose();
   }
@@ -1109,7 +1239,33 @@ class _ScheduleEventDialogState extends State<_ScheduleEventDialog> {
       ),
     );
     if (picked != null && mounted) {
-      setState(() => _startMinutes = picked.hour * 60 + picked.minute);
+      setState(() {
+        _startMinutes = picked.hour * 60 + picked.minute;
+        if (_endMinutes <= _startMinutes) {
+          _endMinutes = (_startMinutes + 60).clamp(1, 1440).toInt();
+        }
+        _invalidTimeRange = false;
+      });
+    }
+  }
+
+  Future<void> _pickEndTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: _endMinutes == 1440 ? 0 : _endMinutes ~/ 60,
+        minute: _endMinutes == 1440 ? 0 : _endMinutes % 60,
+      ),
+      helpText: 'Select end time',
+    );
+    if (picked != null && mounted) {
+      final selectedMinutes = picked.hour * 60 + picked.minute;
+      setState(() {
+        _endMinutes = selectedMinutes == 0 && _startMinutes > 0
+            ? 1440
+            : selectedMinutes;
+        _invalidTimeRange = _endMinutes <= _startMinutes;
+      });
     }
   }
 
@@ -1120,17 +1276,55 @@ class _ScheduleEventDialogState extends State<_ScheduleEventDialog> {
     return '$hour12:${minute.toString().padLeft(2, '0')} ${hour24 < 12 ? 'AM' : 'PM'}';
   }
 
+  String _formatEndTime() {
+    if (_endMinutes == 1440) return '12:00 AM';
+    final hour24 = _endMinutes ~/ 60;
+    final minute = _endMinutes % 60;
+    final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+    return '$hour12:${minute.toString().padLeft(2, '0')} ${hour24 < 12 ? 'AM' : 'PM'}';
+  }
+
+  String _suggestedTitle(String category) {
+    switch (category) {
+      case 'Work':
+        return 'Work';
+      case 'Sleep':
+        return 'Sleep';
+      case 'Rest':
+        return 'Rest and recharge';
+      case 'Commute':
+        return 'Commute';
+      case 'Life':
+        return 'Time for life';
+      case 'Meals':
+        return 'Meal';
+      default:
+        return 'Time block';
+    }
+  }
+
+  void _changeCategory(String category) {
+    final oldSuggestion = _suggestedTitle(_category);
+    if (_title.text.trim().isEmpty || _title.text.trim() == oldSuggestion) {
+      _title.text = _suggestedTitle(category);
+    }
+    setState(() => _category = category);
+  }
+
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_endMinutes <= _startMinutes) {
+      setState(() => _invalidTimeRange = true);
+      return;
+    }
     Navigator.of(context).pop(
-      _ScheduleEventDraft(
+      ScheduleEventDraft(
         title: _title.text.trim(),
         category: _category,
         date: _date,
         startMinutes: _startMinutes,
-        durationMinutes: int.parse(_duration.text.trim()),
+        durationMinutes: _endMinutes - _startMinutes,
         notes: _notes.text.trim(),
-        activityId: _activityId,
       ),
     );
   }
@@ -1159,12 +1353,18 @@ class _ScheduleEventDialogState extends State<_ScheduleEventDialog> {
                 validator: (value) => value == null || value.trim().isEmpty
                     ? 'Enter an event title.'
                     : null,
-                decoration: const InputDecoration(labelText: 'Title'),
+                decoration: InputDecoration(
+                  labelText: 'Plan block',
+                  hintText: 'e.g. ${_suggestedTitle(_category)}',
+                ),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: _category,
-                decoration: const InputDecoration(labelText: 'Category'),
+                decoration: const InputDecoration(
+                  labelText: 'Life area',
+                  helperText: 'Choose what this time is for.',
+                ),
                 items: _categories
                     .map(
                       (category) => DropdownMenuItem(
@@ -1174,24 +1374,29 @@ class _ScheduleEventDialogState extends State<_ScheduleEventDialog> {
                     )
                     .toList(),
                 onChanged: (value) {
-                  if (value != null) setState(() => _category = value);
+                  if (value != null) _changeCategory(value);
                 },
               ),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _pickDate,
-                      icon: const Icon(Icons.calendar_today_outlined, size: 16),
-                      label: Text(
-                        MaterialLocalizations.of(
-                          context,
-                        ).formatShortDate(_date),
+                  if (widget.allowDateChange) ...[
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _pickDate,
+                        icon: const Icon(
+                          Icons.calendar_today_outlined,
+                          size: 16,
+                        ),
+                        label: Text(
+                          MaterialLocalizations.of(
+                            context,
+                          ).formatShortDate(_date),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
+                    const SizedBox(width: 8),
+                  ],
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: _pickTime,
@@ -1199,71 +1404,42 @@ class _ScheduleEventDialogState extends State<_ScheduleEventDialog> {
                       label: Text(_formatStartTime()),
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickEndTime,
+                      icon: const Icon(Icons.flag_outlined, size: 16),
+                      label: Text(_formatEndTime()),
+                    ),
+                  ),
                 ],
               ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _duration,
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  final duration = int.tryParse(value?.trim() ?? '');
-                  return duration == null || duration <= 0
-                      ? 'Enter a duration greater than zero.'
-                      : null;
-                },
-                decoration: const InputDecoration(
-                  labelText: 'Duration',
-                  suffixText: 'minutes',
+              const SizedBox(height: 5),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Set a start and end time. Blocks stay within this day.',
+                  style: GoogleFonts.inter(fontSize: 10, color: AppColors.sub),
                 ),
               ),
+              if (_invalidTimeRange) ...[
+                const SizedBox(height: 4),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'End time must be after start time.',
+                    style: GoogleFonts.inter(
+                      fontSize: 10,
+                      color: AppColors.clayDark,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               TextFormField(
                 controller: _notes,
                 maxLines: 2,
                 decoration: const InputDecoration(labelText: 'Notes'),
-              ),
-              const SizedBox(height: 12),
-              StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: FirestoreService().activitiesForDate(
-                  widget.userId,
-                  _date,
-                ),
-                builder: (context, snapshot) {
-                  final activities = snapshot.data?.docs ?? [];
-                  final safeActivityId =
-                      activities.any((activity) => activity.id == _activityId)
-                      ? _activityId
-                      : null;
-                  return DropdownButtonFormField<String?>(
-                    initialValue: safeActivityId,
-                    decoration: InputDecoration(
-                      labelText: 'Linked activity',
-                      helperText: snapshot.hasError
-                          ? 'Activities unavailable'
-                          : !snapshot.hasData
-                          ? 'Loading activities…'
-                          : 'Optional',
-                    ),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('No linked activity'),
-                      ),
-                      ...activities.map(
-                        (activity) => DropdownMenuItem<String?>(
-                          value: activity.id,
-                          child: Text(
-                            activity.data()['title']?.toString() ?? 'Activity',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ),
-                    ],
-                    onChanged: snapshot.hasError
-                        ? null
-                        : (value) => setState(() => _activityId = value),
-                  );
-                },
               ),
             ],
           ),

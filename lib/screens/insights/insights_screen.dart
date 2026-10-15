@@ -144,6 +144,9 @@ class _InsightsScreenState extends State<InsightsScreen> {
                           }
 
                           final activities = activitySnapshot.data!.docs;
+                          final trackedActivities = _completedTimedActivities(
+                            activities,
+                          );
                           final energyByDay = _energyByDay(
                             checkInSnapshot.data!.docs,
                           );
@@ -168,26 +171,72 @@ class _InsightsScreenState extends State<InsightsScreen> {
                           final previousAverage = _average(
                             previousEnergyByDay.values,
                           );
-                          final workMinutes = _minutesFor(activities, {'work'});
-                          final healthMinutes = _minutesFor(activities, {
-                            'health',
-                          });
-                          final personalMinutes = _minutesFor(activities, {
-                            'personal',
-                            'leisure',
-                            'learning',
-                            'other',
-                          });
-                          final workCount = _countFor(activities, {'work'});
-                          final healthCount = _countFor(activities, {'health'});
-                          final personalCount = _countFor(activities, {
-                            'personal',
-                            'leisure',
-                            'learning',
-                            'other',
-                          });
+                          final workMinutes = _minutesForArea(
+                            trackedActivities,
+                            'Work',
+                          );
+                          final commuteMinutes = _minutesForArea(
+                            trackedActivities,
+                            'Commute',
+                          );
+                          final sleepMinutes = _minutesForArea(
+                            trackedActivities,
+                            'Sleep',
+                          );
+                          final restMinutes = _minutesForArea(
+                            trackedActivities,
+                            'Rest',
+                          );
+                          final lifeMinutes = _minutesForArea(
+                            trackedActivities,
+                            'Life',
+                          );
+                          final workCount = _countForArea(
+                            trackedActivities,
+                            'Work',
+                          );
+                          final commuteCount = _countForArea(
+                            trackedActivities,
+                            'Commute',
+                          );
+                          final sleepCount = _countForArea(
+                            trackedActivities,
+                            'Sleep',
+                          );
+                          final restCount = _countForArea(
+                            trackedActivities,
+                            'Rest',
+                          );
+                          final lifeCount = _countForArea(
+                            trackedActivities,
+                            'Life',
+                          );
                           final totalBreakdown =
-                              workMinutes + healthMinutes + personalMinutes;
+                              workMinutes +
+                              commuteMinutes +
+                              sleepMinutes +
+                              restMinutes +
+                              lifeMinutes;
+                          final topActivity = _topTrackedActivity(
+                            trackedActivities,
+                          );
+                          final completedWithoutDuration = activities.where((
+                            activity,
+                          ) {
+                            final data = activity.data();
+                            final duration = data['durationMinutes'];
+                            return data['completed'] == true &&
+                                (duration is! num || duration <= 0);
+                          }).length;
+                          final unfinishedWithDuration = activities.where((
+                            activity,
+                          ) {
+                            final data = activity.data();
+                            final duration = data['durationMinutes'];
+                            return data['completed'] != true &&
+                                duration is num &&
+                                duration > 0;
+                          }).length;
                           final completedGoals = goals
                               .where((goal) => goal.data()['completed'] == true)
                               .length;
@@ -207,6 +256,62 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 const SizedBox(height: 18),
                               ],
                               const _SectionTitle(
+                                title: 'Work–life time balance',
+                                subtitle:
+                                    'A split of completed activities with a duration.',
+                              ),
+                              const SizedBox(height: 12),
+                              _WorkLifeBalanceCard(
+                                workMinutes: workMinutes + commuteMinutes,
+                                lifeMinutes:
+                                    sleepMinutes + restMinutes + lifeMinutes,
+                                topActivity: topActivity,
+                                completedWithoutDuration:
+                                    completedWithoutDuration,
+                                unfinishedWithDuration: unfinishedWithDuration,
+                              ),
+                              const SizedBox(height: 24),
+                              const _SectionTitle(
+                                title: 'Time by activity type',
+                                subtitle:
+                                    'Completed activities with durations, grouped by category.',
+                              ),
+                              const SizedBox(height: 12),
+                              _ActivityBreakdownCard(
+                                workPercentage: _share(
+                                  workMinutes,
+                                  totalBreakdown,
+                                ),
+                                commutePercentage: _share(
+                                  commuteMinutes,
+                                  totalBreakdown,
+                                ),
+                                sleepPercentage: _share(
+                                  sleepMinutes,
+                                  totalBreakdown,
+                                ),
+                                restPercentage: _share(
+                                  restMinutes,
+                                  totalBreakdown,
+                                ),
+                                lifePercentage: _share(
+                                  lifeMinutes,
+                                  totalBreakdown,
+                                ),
+                                workMinutes: workMinutes,
+                                commuteMinutes: commuteMinutes,
+                                sleepMinutes: sleepMinutes,
+                                restMinutes: restMinutes,
+                                lifeMinutes: lifeMinutes,
+                                totalMinutes: totalBreakdown,
+                                workCount: workCount,
+                                commuteCount: commuteCount,
+                                sleepCount: sleepCount,
+                                restCount: restCount,
+                                lifeCount: lifeCount,
+                              ),
+                              const SizedBox(height: 24),
+                              const _SectionTitle(
                                 title: 'Energy trend',
                                 subtitle: 'Your check-ins, day by day.',
                               ),
@@ -220,31 +325,6 @@ class _InsightsScreenState extends State<InsightsScreen> {
                                 averageEnergy: currentAverage,
                                 previousAverage: previousAverage,
                                 checkInCount: energyByDay.length,
-                              ),
-                              const SizedBox(height: 24),
-                              const _SectionTitle(
-                                title: 'Activity breakdown',
-                                subtitle:
-                                    'Based on durations you logged this week.',
-                              ),
-                              const SizedBox(height: 12),
-                              _ActivityBreakdownCard(
-                                workPercentage: totalBreakdown == 0
-                                    ? 0
-                                    : workMinutes / totalBreakdown * 100,
-                                healthPercentage: totalBreakdown == 0
-                                    ? 0
-                                    : healthMinutes / totalBreakdown * 100,
-                                personalPercentage: totalBreakdown == 0
-                                    ? 0
-                                    : personalMinutes / totalBreakdown * 100,
-                                workMinutes: workMinutes,
-                                healthMinutes: healthMinutes,
-                                personalMinutes: personalMinutes,
-                                totalMinutes: totalBreakdown,
-                                workCount: workCount,
-                                healthCount: healthCount,
-                                personalCount: personalCount,
                               ),
                               const SizedBox(height: 24),
                               const _SectionTitle(
@@ -293,7 +373,19 @@ class _InsightsScreenState extends State<InsightsScreen> {
           .first;
       final scores = _energyByDay(checkInSnapshot.docs);
       final average = _average(scores.values);
-      final activityCount = activitySnapshot.docs.length;
+      final activities = activitySnapshot.docs;
+      final trackedActivities = _completedTimedActivities(activities);
+      final workMinutes =
+          _minutesForArea(trackedActivities, 'Work') +
+          _minutesForArea(trackedActivities, 'Commute');
+      final lifeMinutes = _totalMinutes(trackedActivities) - workMinutes;
+      final totalTrackedMinutes = workMinutes + lifeMinutes;
+      final workShare = totalTrackedMinutes == 0
+          ? 0
+          : (workMinutes * 100 / totalTrackedMinutes).round();
+      final lifeShare = totalTrackedMinutes == 0 ? 0 : 100 - workShare;
+      final topActivity = _topTrackedActivity(trackedActivities);
+      final activityCount = activities.length;
       final averageText = average == null
           ? 'No energy check-ins'
           : 'Average energy ${average.toStringAsFixed(1)}/10';
@@ -302,6 +394,12 @@ class _InsightsScreenState extends State<InsightsScreen> {
         '${_formatDate(weekStart)} – ${_formatDate(end)}',
         averageText,
         '$activityCount activities logged',
+        if (totalTrackedMinutes > 0)
+          'Work–life split: Work $workShare% (${_formatMinutes(workMinutes)}), Life $lifeShare% (${_formatMinutes(lifeMinutes)})',
+        if (topActivity != null)
+          'Most tracked activity: ${topActivity.title} (${topActivity.category}) · ${_formatMinutes(topActivity.minutes)}',
+        if (totalTrackedMinutes == 0)
+          'No completed activity durations recorded this week',
       ].join('\n');
       await Clipboard.setData(ClipboardData(text: summary));
       if (context.mounted) {
@@ -336,30 +434,102 @@ class _InsightsScreenState extends State<InsightsScreen> {
     return scores.reduce((a, b) => a + b) / scores.length;
   }
 
-  static int _minutesFor(
+  static int _minutesForArea(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> activities,
-    Set<String> categories,
+    String area,
   ) => activities
       .where(
-        (activity) => categories.contains(
-          activity.data()['category']?.toString().toLowerCase(),
-        ),
+        (activity) =>
+            _canonicalArea(activity.data()['category']?.toString()) == area,
       )
       .fold<int>(0, (total, activity) {
         final duration = activity.data()['durationMinutes'];
         return total + (duration is num ? duration.round() : 0);
       });
 
-  static int _countFor(
+  static double _share(int value, int total) =>
+      total == 0 ? 0 : value / total * 100;
+
+  static String _canonicalArea(String? rawCategory) {
+    switch (rawCategory?.trim().toLowerCase()) {
+      case 'work':
+        return 'Work';
+      case 'commute':
+        return 'Commute';
+      case 'sleep':
+        return 'Sleep';
+      case 'rest':
+        return 'Rest';
+      default:
+        return 'Life';
+    }
+  }
+
+  static int _totalMinutes(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> activities,
-    Set<String> categories,
+  ) => activities.fold<int>(0, (total, activity) {
+    final duration = activity.data()['durationMinutes'];
+    return total + (duration is num ? duration.round() : 0);
+  });
+
+  static List<QueryDocumentSnapshot<Map<String, dynamic>>>
+  _completedTimedActivities(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> activities,
+  ) => activities
+      .where((activity) {
+        final data = activity.data();
+        final duration = data['durationMinutes'];
+        return data['completed'] == true && duration is num && duration > 0;
+      })
+      .toList(growable: false);
+
+  static _TopTrackedActivity? _topTrackedActivity(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> activities,
+  ) {
+    final totals = <String, _TopTrackedActivity>{};
+    for (final activity in activities) {
+      final data = activity.data();
+      final rawTitle = data['title']?.toString().trim() ?? '';
+      final rawCategory = data['category']?.toString().trim() ?? '';
+      final title = rawTitle.isEmpty ? 'Untitled activity' : rawTitle;
+      final category = _canonicalArea(rawCategory);
+      final duration = data['durationMinutes'];
+      if (duration is! num || duration <= 0) continue;
+
+      final key = '${category.toLowerCase()}|${title.toLowerCase()}';
+      final existing = totals[key];
+      totals[key] = _TopTrackedActivity(
+        title: title,
+        category: category,
+        minutes: (existing?.minutes ?? 0) + duration.round(),
+        entries: (existing?.entries ?? 0) + 1,
+      );
+    }
+
+    _TopTrackedActivity? top;
+    for (final activity in totals.values) {
+      if (top == null || activity.minutes > top.minutes) top = activity;
+    }
+    return top;
+  }
+
+  static int _countForArea(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> activities,
+    String area,
   ) => activities
       .where(
-        (activity) => categories.contains(
-          activity.data()['category']?.toString().toLowerCase(),
-        ),
+        (activity) =>
+            _canonicalArea(activity.data()['category']?.toString()) == area,
       )
       .length;
+
+  static String _formatMinutes(int minutes) {
+    final hours = minutes ~/ 60;
+    final remainingMinutes = minutes % 60;
+    if (hours == 0) return '${remainingMinutes}m';
+    if (remainingMinutes == 0) return '${hours}h';
+    return '${hours}h ${remainingMinutes}m';
+  }
 
   static String? _bestDay(Map<String, int> dailyScores) {
     if (dailyScores.isEmpty) return null;
@@ -402,6 +572,20 @@ class _InsightsScreenState extends State<InsightsScreen> {
 
     return [];
   }
+}
+
+class _TopTrackedActivity {
+  const _TopTrackedActivity({
+    required this.title,
+    required this.category,
+    required this.minutes,
+    required this.entries,
+  });
+
+  final String title;
+  final String category;
+  final int minutes;
+  final int entries;
 }
 
 String _insightsDateKey(DateTime date) {
@@ -504,7 +688,7 @@ class _InsightsIntro extends StatelessWidget {
                 ),
                 const SizedBox(height: 7),
                 Text(
-                  'Look back at your energy, completed goals, and time you chose to track.',
+                  'See where your completed activity time went, alongside your energy and goals.',
                   style: GoogleFonts.inter(
                     fontSize: 11.5,
                     height: 1.45,
@@ -674,13 +858,17 @@ class _SummaryStat extends StatelessWidget {
 
 class _TimeAllocationCard extends StatelessWidget {
   final double workPercentage;
-  final double healthPercentage;
-  final double personalPercentage;
+  final double commutePercentage;
+  final double sleepPercentage;
+  final double restPercentage;
+  final double lifePercentage;
 
   const _TimeAllocationCard({
     required this.workPercentage,
-    required this.healthPercentage,
-    required this.personalPercentage,
+    required this.commutePercentage,
+    required this.sleepPercentage,
+    required this.restPercentage,
+    required this.lifePercentage,
   });
 
   @override
@@ -704,42 +892,64 @@ class _TimeAllocationCard extends StatelessWidget {
                     flex: (workPercentage * 10).round().clamp(1, 1000),
                     child: Container(height: 12, color: AppColors.clay),
                   ),
-                if (healthPercentage > 0)
+                if (commutePercentage > 0)
                   Expanded(
-                    flex: (healthPercentage * 10).round().clamp(1, 1000),
+                    flex: (commutePercentage * 10).round().clamp(1, 1000),
+                    child: Container(
+                      height: 12,
+                      color: AppColors.clay.withValues(alpha: 0.58),
+                    ),
+                  ),
+                if (sleepPercentage > 0)
+                  Expanded(
+                    flex: (sleepPercentage * 10).round().clamp(1, 1000),
+                    child: Container(height: 12, color: AppColors.pistachio),
+                  ),
+                if (restPercentage > 0)
+                  Expanded(
+                    flex: (restPercentage * 10).round().clamp(1, 1000),
                     child: Container(height: 12, color: AppColors.eucalyptus),
                   ),
-                if (personalPercentage > 0)
+                if (lifePercentage > 0)
                   Expanded(
-                    flex: (personalPercentage * 10).round().clamp(1, 1000),
-                    child: Container(height: 12, color: AppColors.peach),
+                    flex: (lifePercentage * 10).round().clamp(1, 1000),
+                    child: Container(
+                      height: 12,
+                      color: AppColors.eucalyptusDark,
+                    ),
                   ),
               ],
             ),
           ),
           const SizedBox(height: 16),
-          Row(
+          Wrap(
+            spacing: 11,
+            runSpacing: 7,
             children: [
-              Expanded(
-                child: _LegendItem(
-                  color: AppColors.clay,
-                  label: 'Work',
-                  percentage: workPercentage,
-                ),
+              _LegendItem(
+                color: AppColors.clay,
+                label: 'Work',
+                percentage: workPercentage,
               ),
-              Expanded(
-                child: _LegendItem(
-                  color: AppColors.eucalyptus,
-                  label: 'Health',
-                  percentage: healthPercentage,
-                ),
+              _LegendItem(
+                color: AppColors.clay.withValues(alpha: 0.58),
+                label: 'Commute',
+                percentage: commutePercentage,
               ),
-              Expanded(
-                child: _LegendItem(
-                  color: AppColors.peach,
-                  label: 'Personal',
-                  percentage: personalPercentage,
-                ),
+              _LegendItem(
+                color: AppColors.pistachio,
+                label: 'Sleep',
+                percentage: sleepPercentage,
+              ),
+              _LegendItem(
+                color: AppColors.eucalyptus,
+                label: 'Rest',
+                percentage: restPercentage,
+              ),
+              _LegendItem(
+                color: AppColors.eucalyptusDark,
+                label: 'Life',
+                percentage: lifePercentage,
               ),
             ],
           ),
@@ -1009,29 +1219,288 @@ class _EnergyTrendPainter extends CustomPainter {
       oldDelegate.values != values;
 }
 
+class _WorkLifeBalanceCard extends StatelessWidget {
+  const _WorkLifeBalanceCard({
+    required this.workMinutes,
+    required this.lifeMinutes,
+    required this.topActivity,
+    required this.completedWithoutDuration,
+    required this.unfinishedWithDuration,
+  });
+
+  final int workMinutes;
+  final int lifeMinutes;
+  final _TopTrackedActivity? topActivity;
+  final int completedWithoutDuration;
+  final int unfinishedWithDuration;
+
+  @override
+  Widget build(BuildContext context) {
+    final totalMinutes = workMinutes + lifeMinutes;
+    final workShare = totalMinutes == 0
+        ? 0
+        : (workMinutes * 100 / totalMinutes).round();
+    final lifeShare = totalMinutes == 0 ? 0 : 100 - workShare;
+    final workFlex = totalMinutes == 0
+        ? 1
+        : (workMinutes / totalMinutes * 1000).round().clamp(1, 1000).toInt();
+    final lifeFlex = totalMinutes == 0
+        ? 1
+        : (lifeMinutes / totalMinutes * 1000).round().clamp(1, 1000).toInt();
+    final difference = (workMinutes - lifeMinutes).abs();
+    final balanceMessage = workMinutes == 0 || lifeMinutes == 0
+        ? 'No completed ${workMinutes == 0 ? 'work' : 'life'} time was logged in the selected week’s activities.'
+        : workMinutes == lifeMinutes
+        ? 'Your tracked work and life time were evenly split.'
+        : '${workMinutes > lifeMinutes ? 'Work' : 'Life'} took ${_InsightsScreenState._formatMinutes(difference)} more in your tracked activities.';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(17),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(17),
+        border: Border.all(color: AppColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: AppColors.eucalyptus,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: const Icon(
+                  Icons.balance,
+                  size: 19,
+                  color: AppColors.eucalyptusDark,
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Text(
+                  'Work and life time split',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.ink,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (totalMinutes == 0) ...[
+            Text(
+              'There is not enough completed activity time to compare yet.',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.ink,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              'Add a duration to an activity and mark it complete to count it as time spent.',
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                height: 1.45,
+                color: AppColors.sub,
+              ),
+            ),
+          ] else ...[
+            Text(
+              balanceMessage,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+                color: AppColors.ink,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _BalanceTimeValue(
+                    label: 'Work',
+                    minutes: workMinutes,
+                    percentage: workShare,
+                    color: AppColors.clay,
+                  ),
+                ),
+                Container(width: 1, height: 44, color: AppColors.line),
+                Expanded(
+                  child: _BalanceTimeValue(
+                    label: 'Life',
+                    minutes: lifeMinutes,
+                    percentage: lifeShare,
+                    color: AppColors.eucalyptusDark,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 13),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Row(
+                children: [
+                  if (workMinutes > 0)
+                    Expanded(
+                      flex: workFlex,
+                      child: Container(height: 10, color: AppColors.clay),
+                    ),
+                  if (lifeMinutes > 0)
+                    Expanded(
+                      flex: lifeFlex,
+                      child: Container(height: 10, color: AppColors.eucalyptus),
+                    ),
+                ],
+              ),
+            ),
+            if (topActivity != null) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Largest time commitment',
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.sub,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${topActivity!.title} · ${topActivity!.category}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                ),
+              ),
+              Text(
+                '${_InsightsScreenState._formatMinutes(topActivity!.minutes)} across ${topActivity!.entries} completed ${topActivity!.entries == 1 ? 'entry' : 'entries'}',
+                style: GoogleFonts.inter(fontSize: 10, color: AppColors.sub),
+              ),
+            ],
+          ],
+          if (completedWithoutDuration > 0 || unfinishedWithDuration > 0) ...[
+            const SizedBox(height: 12),
+            Text(
+              [
+                if (completedWithoutDuration > 0)
+                  '$completedWithoutDuration completed ${completedWithoutDuration == 1 ? 'activity has' : 'activities have'} no duration.',
+                if (unfinishedWithDuration > 0)
+                  '$unfinishedWithDuration unfinished ${unfinishedWithDuration == 1 ? 'activity is' : 'activities are'} excluded until marked complete.',
+              ].join(' '),
+              style: GoogleFonts.inter(
+                fontSize: 10,
+                height: 1.4,
+                color: AppColors.sub,
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Text(
+            'Work includes commute; the other side includes Sleep, Rest, and Life. This compares completed activities with durations, not every hour in your day.',
+            style: GoogleFonts.inter(
+              fontSize: 10,
+              height: 1.45,
+              color: AppColors.sub,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BalanceTimeValue extends StatelessWidget {
+  const _BalanceTimeValue({
+    required this.label,
+    required this.minutes,
+    required this.percentage,
+    required this.color,
+  });
+
+  final String label;
+  final int minutes;
+  final int percentage;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 8),
+    child: Column(
+      children: [
+        Text(
+          label.toUpperCase(),
+          style: GoogleFonts.inter(
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.7,
+            color: color,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          _InsightsScreenState._formatMinutes(minutes),
+          style: GoogleFonts.fraunces(
+            fontSize: 19,
+            fontWeight: FontWeight.w600,
+            color: AppColors.ink,
+          ),
+        ),
+        Text(
+          '$percentage% of tracked time',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(fontSize: 9, color: AppColors.sub),
+        ),
+      ],
+    ),
+  );
+}
+
 class _ActivityBreakdownCard extends StatelessWidget {
   final int workMinutes;
-  final int healthMinutes;
-  final int personalMinutes;
+  final int commuteMinutes;
+  final int sleepMinutes;
+  final int restMinutes;
+  final int lifeMinutes;
   final int totalMinutes;
   final int workCount;
-  final int healthCount;
-  final int personalCount;
+  final int commuteCount;
+  final int sleepCount;
+  final int restCount;
+  final int lifeCount;
   final double workPercentage;
-  final double healthPercentage;
-  final double personalPercentage;
+  final double commutePercentage;
+  final double sleepPercentage;
+  final double restPercentage;
+  final double lifePercentage;
 
   const _ActivityBreakdownCard({
     required this.workMinutes,
-    required this.healthMinutes,
-    required this.personalMinutes,
+    required this.commuteMinutes,
+    required this.sleepMinutes,
+    required this.restMinutes,
+    required this.lifeMinutes,
     required this.totalMinutes,
     required this.workCount,
-    required this.healthCount,
-    required this.personalCount,
+    required this.commuteCount,
+    required this.sleepCount,
+    required this.restCount,
+    required this.lifeCount,
     required this.workPercentage,
-    required this.healthPercentage,
-    required this.personalPercentage,
+    required this.commutePercentage,
+    required this.sleepPercentage,
+    required this.restPercentage,
+    required this.lifePercentage,
   });
 
   @override
@@ -1041,8 +1510,10 @@ class _ActivityBreakdownCard extends StatelessWidget {
         if (totalMinutes > 0) ...[
           _TimeAllocationCard(
             workPercentage: workPercentage,
-            healthPercentage: healthPercentage,
-            personalPercentage: personalPercentage,
+            commutePercentage: commutePercentage,
+            sleepPercentage: sleepPercentage,
+            restPercentage: restPercentage,
+            lifePercentage: lifePercentage,
           ),
           const SizedBox(height: 10),
         ] else
@@ -1050,7 +1521,7 @@ class _ActivityBreakdownCard extends StatelessWidget {
             padding: EdgeInsets.only(bottom: 10),
             child: _NotEnoughDataCard(
               message:
-                  'Activities were logged, but no durations were entered. Counts are shown below; add durations to compare time.',
+                  'No completed activities with durations to break down yet. Add durations and mark activities complete to see time by type.',
             ),
           ),
         Container(
@@ -1060,27 +1531,49 @@ class _ActivityBreakdownCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.line),
           ),
-          child: Row(
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 9,
+            runSpacing: 12,
             children: [
-              Expanded(
+              SizedBox(
+                width: 64,
                 child: _BreakdownValue(
                   label: 'Work',
                   minutes: workMinutes,
                   activityCount: workCount,
                 ),
               ),
-              Expanded(
+              SizedBox(
+                width: 64,
                 child: _BreakdownValue(
-                  label: 'Health',
-                  minutes: healthMinutes,
-                  activityCount: healthCount,
+                  label: 'Commute',
+                  minutes: commuteMinutes,
+                  activityCount: commuteCount,
                 ),
               ),
-              Expanded(
+              SizedBox(
+                width: 64,
                 child: _BreakdownValue(
-                  label: 'Personal',
-                  minutes: personalMinutes,
-                  activityCount: personalCount,
+                  label: 'Sleep',
+                  minutes: sleepMinutes,
+                  activityCount: sleepCount,
+                ),
+              ),
+              SizedBox(
+                width: 64,
+                child: _BreakdownValue(
+                  label: 'Rest',
+                  minutes: restMinutes,
+                  activityCount: restCount,
+                ),
+              ),
+              SizedBox(
+                width: 64,
+                child: _BreakdownValue(
+                  label: 'Life',
+                  minutes: lifeMinutes,
+                  activityCount: lifeCount,
                 ),
               ),
             ],

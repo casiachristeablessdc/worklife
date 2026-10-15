@@ -363,6 +363,7 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
   bool _tomorrow = false;
   bool _saving = false;
   String? _error;
+  String? _scheduleEventId;
 
   @override
   void dispose() {
@@ -372,6 +373,10 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
 
   Future<void> _save() async {
     if (_saving) return;
+    if (_scheduleEventId == null) {
+      setState(() => _error = 'Link this focus to a scheduled activity first.');
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
@@ -381,10 +386,26 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
         ? 'Focus for $_dayType'
         : _controller.text.trim();
     try {
+      final scheduledEvents = await FirestoreService()
+          .scheduleForDate(widget.userId, date)
+          .first;
+      if (!scheduledEvents.docs.any(
+        (event) => event.id == _scheduleEventId,
+      )) {
+        if (mounted) {
+          setState(() {
+            _error = 'Choose an activity that is still on this schedule.';
+            _scheduleEventId = null;
+            _saving = false;
+          });
+        }
+        return;
+      }
       await FirestoreService().createGoal(
         userId: widget.userId,
         title: title,
         date: DateTime(date.year, date.month, date.day),
+        scheduleEventId: _scheduleEventId!,
         category: _dayType,
       );
       if (mounted) Navigator.of(context).pop(true);
@@ -454,8 +475,65 @@ class _GoalFormDialogState extends State<_GoalFormDialog> {
                 selected: {_tomorrow},
                 onSelectionChanged: _saving
                     ? null
-                    : (selection) =>
-                          setState(() => _tomorrow = selection.first),
+                    : (selection) => setState(() {
+                        _tomorrow = selection.first;
+                        _scheduleEventId = null;
+                        _error = null;
+                      }),
+              ),
+              const SizedBox(height: 12),
+              StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: FirestoreService().scheduleForDate(
+                  widget.userId,
+                  DateTime.now().add(Duration(days: _tomorrow ? 1 : 0)),
+                ),
+                builder: (context, snapshot) {
+                  final events = snapshot.data?.docs ?? [];
+                  final safeEventId = events.any(
+                    (event) => event.id == _scheduleEventId,
+                  )
+                      ? _scheduleEventId
+                      : null;
+                  return DropdownButtonFormField<String>(
+                    key: ValueKey('goal-schedule-anchor-$_scheduleEventId'),
+                    initialValue: safeEventId,
+                    validator: (value) => value == null
+                        ? 'Choose a scheduled activity for this focus.'
+                        : null,
+                    decoration: InputDecoration(
+                      labelText: 'Schedule anchor',
+                      helperText: snapshot.hasError
+                          ? 'Schedule unavailable'
+                          : events.isEmpty
+                          ? 'Add a time block to this day first.'
+                          : 'Choose what this focus belongs to.',
+                    ),
+                    items: events.map((event) {
+                      final data = event.data();
+                      final start = data['startMinutes'] is num
+                          ? (data['startMinutes'] as num).round()
+                          : 0;
+                      final hour24 = (start ~/ 60) % 24;
+                      final minute = start % 60;
+                      final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+                      final time = '$hour12:${minute.toString().padLeft(2, '0')} '
+                          '${hour24 < 12 ? 'AM' : 'PM'}';
+                      return DropdownMenuItem<String>(
+                        value: event.id,
+                        child: Text(
+                          '$time · ${data['title']?.toString() ?? 'Activity'}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: _saving || snapshot.hasError
+                        ? null
+                        : (value) => setState(() {
+                            _scheduleEventId = value;
+                            _error = null;
+                          }),
+                  );
+                },
               ),
               if (_error != null) ...[
                 const SizedBox(height: 10),

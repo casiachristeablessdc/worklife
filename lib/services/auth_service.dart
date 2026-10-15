@@ -19,10 +19,7 @@ class AuthService {
     required String email,
     required String password,
   }) {
-    return _auth.signInWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
+    return _auth.signInWithEmailAndPassword(email: email, password: password);
   }
 
   Future<UserCredential?> signInWithGoogle() async {
@@ -40,9 +37,15 @@ class AuthService {
   }
 
   Future<void> logout() async {
-    await _googleSignIn.signOut();
+    try {
+      await _googleSignIn.signOut();
+    } catch (_) {
+      // Firebase Auth remains the source of truth for the app session.
+    }
     await _auth.signOut();
   }
 
   User? get currentUser => _auth.currentUser;
+
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
 }
