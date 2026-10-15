@@ -243,7 +243,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Set up your WorkLife account to get started.',
+                'We’re glad you’re here. Create an account and make room for what matters.',
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w400,

@@ -111,11 +111,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'My profile',
+                          'Your profile',
                           style: GoogleFonts.fraunces(
                             fontSize: 32,
                             fontWeight: FontWeight.w600,
                             color: AppColors.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'A little space for the details and routines that make WorkLife yours.',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            height: 1.45,
+                            color: AppColors.sub,
                           ),
                         ),
                         const SizedBox(height: 24),

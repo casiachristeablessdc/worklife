@@ -16,6 +16,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
   final _search = TextEditingController();
   List<Map<String, dynamic>> _users = [];
   String? _next;
+  String _emailFilter = 'All users';
   bool _loading = true;
   String? _error;
   int _request = 0;
@@ -49,6 +50,7 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
       setState(() {
         _users = append ? [..._users, ...page.users] : page.users;
         _next = query == null || query.isEmpty ? page.nextPageToken : null;
+        _truncated = page.truncated;
         _loading = false;
       });
     } catch (error) {
@@ -58,6 +60,21 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
         _loading = false;
       });
     }
+  }
+
+  bool _truncated = false;
+
+  List<Map<String, dynamic>> get _visibleUsers {
+    return _users
+        .where((user) {
+          final hasEmail = (user['email'] as String? ?? '').trim().isNotEmpty;
+          return switch (_emailFilter) {
+            'With email' => hasEmail,
+            'Without email' => !hasEmail,
+            _ => true,
+          };
+        })
+        .toList(growable: false);
   }
 
   String? get _activeSearch {
@@ -158,110 +175,172 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _search,
-                    enabled: !_loading || _users.isNotEmpty,
-                    textInputAction: TextInputAction.search,
-                    onSubmitted: (value) => _load(
-                      query: value.trim().length >= 2 ? value.trim() : null,
-                    ),
-                    decoration: const InputDecoration(
-                      hintText: 'Search by name or email...',
-                      prefixIcon: Icon(Icons.search),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  tooltip: 'Search profiles',
-                  onPressed: _loading
-                      ? null
-                      : () => _load(query: _activeSearch),
-                  icon: const Icon(Icons.search),
-                ),
-                const SizedBox(width: 6),
-                IconButton.filledTonal(
-                  tooltip: 'Refresh profiles',
-                  onPressed: _loading
-                      ? null
-                      : () => _load(query: _activeSearch),
-                  icon: const Icon(Icons.refresh_rounded),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.peach.withValues(alpha: 0.45),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                'Profiles can be viewed and edited here. Creating or deleting Firebase sign-in accounts requires a trusted backend and is unavailable in this Spark-plan app.',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  height: 1.4,
+      if (_loading && _users.isNotEmpty)
+        const LinearProgressIndicator(minHeight: 2),
+      Expanded(
+        child: RefreshIndicator(
+          onRefresh: () => _load(query: _activeSearch),
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(14, 18, 14, 24),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            children: [
+              Text(
+                'Your community',
+                style: GoogleFonts.fraunces(
+                  fontSize: 25,
+                  height: 1.1,
+                  fontWeight: FontWeight.w600,
                   color: AppColors.ink,
                 ),
               ),
-            ),
-          ],
-        ),
-      ),
-      if (_loading) const LinearProgressIndicator(minHeight: 2),
-      Expanded(
-        child: _error != null
-            ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.cloud_off_outlined, size: 36),
-                      const SizedBox(height: 12),
-                      Text(_error!, textAlign: TextAlign.center),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: _loading
-                            ? null
-                            : () => _load(query: _activeSearch),
-                        icon: const Icon(Icons.refresh_rounded),
-                        label: const Text('Try again'),
-                      ),
-                    ],
+              const SizedBox(height: 4),
+              Text(
+                'Find someone, review their details, and make updates with care.',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  height: 1.4,
+                  color: AppColors.sub,
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _search,
+                enabled: !_loading || _users.isNotEmpty,
+                textInputAction: TextInputAction.search,
+                onSubmitted: (value) => _load(
+                  query: value.trim().length >= 2 ? value.trim() : null,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Search users',
+                  prefixIcon: const Icon(Icons.search, size: 16),
+                  suffixIcon: IconButton(
+                    tooltip: 'Search users',
+                    onPressed: _loading
+                        ? null
+                        : () => _load(query: _activeSearch),
+                    icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                  ),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 9,
                   ),
                 ),
-              )
-            : _loading && _users.isEmpty
-            ? const Center(child: CircularProgressIndicator())
-            : _users.isEmpty
-            ? Center(
-                child: Text(
-                  _activeSearch == null
-                      ? 'No user profiles found.'
-                      : 'No profiles match your search.',
-                ),
-              )
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                children: [
-                  for (final user in _users) _userTile(user),
-                  if (_next != null)
-                    OutlinedButton.icon(
-                      onPressed: _loading ? null : () => _load(append: true),
-                      icon: const Icon(Icons.expand_more),
-                      label: const Text('Load more users'),
-                    ),
-                ],
+                style: GoogleFonts.inter(fontSize: 14),
               ),
+              const SizedBox(height: 10),
+              Container(
+                height: 48,
+                padding: const EdgeInsets.symmetric(horizontal: 13),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.line),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      'Email',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.sub,
+                      ),
+                    ),
+                    const Spacer(),
+                    DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _emailFilter,
+                        isDense: true,
+                        borderRadius: BorderRadius.circular(10),
+                        icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.ink,
+                        ),
+                        items:
+                            const ['All users', 'With email', 'Without email']
+                                .map(
+                                  (filter) => DropdownMenuItem(
+                                    value: filter,
+                                    child: Text(filter),
+                                  ),
+                                )
+                                .toList(growable: false),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => _emailFilter = value);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (_error != null) ...[
+                _UsersMessageCard(
+                  message: _error!,
+                  actionLabel: 'Try again',
+                  onPressed: _loading
+                      ? null
+                      : () => _load(query: _activeSearch),
+                ),
+              ] else if (_loading && _users.isEmpty) ...[
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 32),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+              ] else if (_visibleUsers.isEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 28),
+                  child: Center(
+                    child: Text(
+                      _users.isEmpty
+                          ? _activeSearch == null
+                                ? 'No user accounts found.'
+                                : 'No users match your search.'
+                          : 'No users match this email filter.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        color: AppColors.sub,
+                      ),
+                    ),
+                  ),
+                ),
+              ] else ...[
+                for (final user in _visibleUsers) _userTile(user),
+              ],
+              if (_truncated)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Text(
+                    'Showing the first 100 matches. Refine your search to see a specific account.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      color: AppColors.sub,
+                    ),
+                  ),
+                ),
+              if (_next != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: OutlinedButton.icon(
+                    onPressed: _loading ? null : () => _load(append: true),
+                    icon: const Icon(Icons.expand_more, size: 17),
+                    label: Text(
+                      'Load more users',
+                      style: GoogleFonts.inter(fontSize: 13),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     ],
   );
@@ -270,39 +349,149 @@ class _AdminUsersScreenState extends State<AdminUsersScreen> {
     final name = (user['name'] as String? ?? '').trim();
     final photo = (user['photoURL'] as String? ?? '').trim();
     final email = (user['email'] as String? ?? '').trim();
-    return Card(
-      color: Colors.white,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: AppColors.line),
+    final uid = user['uid'] as String;
+    final jobTitle = (user['jobTitle'] as String? ?? '').trim();
+    final company = (user['company'] as String? ?? '').trim();
+    final profileSummary = [
+      if (jobTitle.isNotEmpty) jobTitle,
+      if (company.isNotEmpty) company,
+    ].join(' · ');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 9),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: AppColors.line),
       ),
-      child: ListTile(
-        onTap: _canManageUsers ? () => _showDetails(user) : null,
-        leading: CircleAvatar(
-          backgroundColor: AppColors.eucalyptus,
-          foregroundImage: photo.isEmpty ? null : NetworkImage(photo),
-          child: photo.isNotEmpty
-              ? null
-              : Text(name.isNotEmpty ? name[0].toUpperCase() : '?'),
-        ),
-        title: Text(
-          name.isEmpty ? 'Unnamed user' : name,
-          style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          email.isEmpty ? user['uid'] as String : email,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: IconButton(
-          tooltip: 'Edit profile',
-          onPressed: _canManageUsers ? () => _editProfile(user) : null,
-          icon: const Icon(Icons.edit_outlined),
-        ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: AppColors.pistachio,
+                foregroundColor: AppColors.eucalyptusDark,
+                foregroundImage: photo.isEmpty ? null : NetworkImage(photo),
+                child: photo.isNotEmpty
+                    ? null
+                    : Text(
+                        _initials(name),
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: InkWell(
+                  onTap: _canManageUsers ? () => _showDetails(user) : null,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name.isEmpty ? 'Unnamed user' : name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.ink,
+                        ),
+                      ),
+                      Text(
+                        email.isEmpty ? uid : email,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: AppColors.sub,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              IconButton(
+                tooltip: 'Edit profile',
+                visualDensity: VisualDensity.compact,
+                onPressed: _canManageUsers ? () => _editProfile(user) : null,
+                icon: const Icon(Icons.edit_outlined, size: 19),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  profileSummary.isEmpty
+                      ? 'Job title and company not set'
+                      : profileSummary,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(fontSize: 11, color: AppColors.sub),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _canManageUsers ? () => _showDetails(user) : null,
+                icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                label: Text('Details', style: GoogleFonts.inter(fontSize: 11)),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
+
+  String _initials(String name) {
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty);
+    if (parts.isEmpty) return '?';
+    return parts.take(2).map((part) => part[0].toUpperCase()).join();
+  }
+}
+
+class _UsersMessageCard extends StatelessWidget {
+  const _UsersMessageCard({
+    required this.message,
+    required this.actionLabel,
+    required this.onPressed,
+  });
+
+  final String message;
+  final String actionLabel;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: AppColors.peach,
+      borderRadius: BorderRadius.circular(11),
+      border: Border.all(color: AppColors.line),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(message, style: GoogleFonts.inter(fontSize: 13, height: 1.4)),
+        const SizedBox(height: 4),
+        TextButton(
+          onPressed: onPressed,
+          style: TextButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+          ),
+          child: Text(actionLabel, style: GoogleFonts.inter(fontSize: 13)),
+        ),
+      ],
+    ),
+  );
 }
 
 class _UserFormData {
@@ -371,39 +560,42 @@ class _UserEditorState extends State<_UserEditor> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: const Text('Edit user profile'),
+    actionsAlignment: MainAxisAlignment.end,
+    actionsOverflowAlignment: OverflowBarAlignment.end,
+    actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+    buttonPadding: const EdgeInsets.only(left: 8),
     content: SizedBox(
       width: 400,
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _name,
-              decoration: const InputDecoration(labelText: 'Name'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _name,
+            decoration: const InputDecoration(labelText: 'Name'),
+          ),
+          TextFormField(
+            enabled: false,
+            initialValue: widget.profile['email'] as String? ?? '',
+            decoration: const InputDecoration(
+              labelText: 'Email (managed by account owner)',
             ),
-            TextFormField(
-              enabled: false,
-              initialValue: widget.profile['email'] as String? ?? '',
-              decoration: const InputDecoration(
-                labelText: 'Email (managed by account owner)',
-              ),
+          ),
+          TextField(
+            controller: _job,
+            decoration: const InputDecoration(labelText: 'Job title'),
+          ),
+          TextField(
+            controller: _company,
+            decoration: const InputDecoration(labelText: 'Company'),
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(_error!, style: const TextStyle(color: Colors.red)),
             ),
-            TextField(
-              controller: _job,
-              decoration: const InputDecoration(labelText: 'Job title'),
-            ),
-            TextField(
-              controller: _company,
-              decoration: const InputDecoration(labelText: 'Company'),
-            ),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
-              ),
-          ],
-        ),
+        ],
       ),
     ),
     actions: [
@@ -411,7 +603,14 @@ class _UserEditorState extends State<_UserEditor> {
         onPressed: () => Navigator.pop(context),
         child: const Text('Cancel'),
       ),
-      FilledButton(onPressed: _save, child: const Text('Save')),
+      FilledButton(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(112, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+        ),
+        onPressed: _save,
+        child: const Text('Save'),
+      ),
     ],
   );
 }

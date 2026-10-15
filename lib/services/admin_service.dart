@@ -13,17 +13,14 @@ class AdminService {
   static const _userPageSize = 50;
   final FirebaseFirestore _firestore;
 
-  /// Counts profile documents and per-user WorkLife subcollection records.
-  /// This uses only Firestore reads authorized by the current user's rules.
+  /// Reads the profile and record counts available to the verified admin.
   Future<Map<String, dynamic>> loadDashboard() async {
     final userPage = await _firestore
         .collection('users')
         .orderBy(FieldPath.documentId)
         .get();
-    var recordCount = 0;
+    final recordCounts = {for (final name in _recordCollections) name: 0};
 
-    // Bound concurrent aggregate requests so larger profile lists do not
-    // create an unbounded burst of Firestore traffic.
     const usersPerBatch = 8;
     for (
       var offset = 0;
@@ -34,23 +31,38 @@ class AdminService {
           ? offset + usersPerBatch
           : userPage.docs.length;
       final batch = userPage.docs.sublist(offset, end);
-      final counts = await Future.wait(
-        batch.expand(
-          (user) => _recordCollections.map((collectionName) async {
-            final result = await _firestore
-                .collection('users')
-                .doc(user.id)
-                .collection(collectionName)
-                .count()
-                .get();
-            return result.count ?? 0;
-          }),
+      final userCounts = await Future.wait(
+        batch.map(
+          (user) => Future.wait(
+            _recordCollections.map((collectionName) async {
+              final result = await _firestore
+                  .collection('users')
+                  .doc(user.id)
+                  .collection(collectionName)
+                  .count()
+                  .get();
+              return result.count ?? 0;
+            }),
+          ),
         ),
       );
-      recordCount += counts.fold<int>(0, (total, value) => total + value);
+      for (final counts in userCounts) {
+        for (var index = 0; index < _recordCollections.length; index++) {
+          final collection = _recordCollections[index];
+          recordCounts[collection] = recordCounts[collection]! + counts[index];
+        }
+      }
     }
 
-    return {'totalUsers': userPage.docs.length, 'totalRecords': recordCount};
+    final totalRecords = recordCounts.values.fold<int>(
+      0,
+      (total, records) => total + records,
+    );
+    return {
+      'totalUsers': userPage.docs.length,
+      'totalRecords': totalRecords,
+      'recordsByCollection': recordCounts,
+    };
   }
 
   Future<AdminUsersPage> listUsers({
@@ -62,8 +74,7 @@ class AdminService {
         .orderBy(FieldPath.documentId)
         .limit(pageSize);
     if (pageToken != null && pageToken.isNotEmpty) {
-      final cursor = await _firestore.collection('users').doc(pageToken).get();
-      if (cursor.exists) query = query.startAfterDocument(cursor);
+      query = query.startAfter([pageToken]);
     }
 
     final page = await query.get();
@@ -73,8 +84,7 @@ class AdminService {
     );
   }
 
-  /// Firestore does not provide full-text search. Fetches real profile pages
-  /// and filters name, email, and document ID locally for complete results.
+  /// Firestore has no full-text search. Scan profile pages and match locally.
   Future<AdminUsersPage> searchUsers(String query) async {
     final term = query.trim().toLowerCase();
     if (term.isEmpty) return listUsers();
@@ -110,8 +120,7 @@ class AdminService {
     return AdminUserDetails(profile: _mapProfile(snapshot));
   }
 
-  /// Updates only ordinary profile fields. Account and admin fields are never
-  /// writable through this client operation.
+  /// Updates editable profile fields. Protected access fields remain untouched.
   Future<void> updateUser({
     required String uid,
     required String name,
@@ -164,10 +173,15 @@ String adminServiceErrorMessage(Object error) {
 }
 
 class AdminUsersPage {
-  const AdminUsersPage({required this.users, required this.nextPageToken});
+  const AdminUsersPage({
+    required this.users,
+    required this.nextPageToken,
+    this.truncated = false,
+  });
 
   final List<Map<String, dynamic>> users;
   final String? nextPageToken;
+  final bool truncated;
 }
 
 class AdminUserDetails {

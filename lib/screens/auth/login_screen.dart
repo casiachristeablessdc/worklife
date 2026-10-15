@@ -322,7 +322,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Log in to continue managing your work-life.',
+                'Good to see you again. Sign in and pick up where you left off.',
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w400,

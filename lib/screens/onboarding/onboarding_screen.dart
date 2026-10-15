@@ -72,7 +72,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                'Tell us a few things about your work life so we can make WorkLife more useful for you.',
+                'A few details will help us make WorkLife feel more like yours.',
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   height: 1.5,
@@ -272,7 +272,7 @@ class _OnboardingStepTwoScreenState extends State<OnboardingStepTwoScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                'Tell us about your usual schedule so WorkLife can understand how your day is structured.',
+                'Share your usual hours so we can help make space for the rest of life.',
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   height: 1.5,
@@ -655,7 +655,7 @@ class _OnboardingStepThreeScreenState extends State<OnboardingStepThreeScreen> {
               ),
               const SizedBox(height: 10),
               Text(
-                'Work is only one part of your day. Tell us what matters to you outside of it.',
+                'Tell us what you’d like to make more room for outside of work.',
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   height: 1.5,

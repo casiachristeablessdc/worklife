@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -6,7 +8,6 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
-import '../../widgets/day_allocation_card.dart';
 import '../home/home_screen.dart';
 import '../goals/goals_screen.dart';
 import '../insights/insights_screen.dart';
@@ -21,15 +22,12 @@ class ScheduleScreen extends StatefulWidget {
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
   DateTime _selectedDate = DateTime.now();
-  bool _weekView = false;
   bool _isSaving = false;
+  int _scheduleRetryVersion = 0;
   final Set<String> _seededRoutineDays = {};
 
   DateTime get _selectedDay =>
       DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
-
-  DateTime get _weekStart =>
-      _selectedDay.subtract(Duration(days: _selectedDay.weekday - 1));
 
   void _seedRoutineForDay(String userId, Map<String, dynamic> profile) {
     final rawWorkdays = profile['workdays'];
@@ -85,6 +83,17 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     await _editEvent(userId, _selectedDay);
   }
 
+  int _suggestedStartMinutes(DateTime date) {
+    if (!_isSameDate(date, DateTime.now())) return 9 * 60;
+    final now = DateTime.now();
+    final currentMinutes = now.hour * 60 + now.minute;
+    return (((currentMinutes + 14) ~/ 15) * 15).clamp(0, 1410).toInt();
+  }
+
+  void _retrySchedule() {
+    setState(() => _scheduleRetryVersion++);
+  }
+
   Future<void> _editEvent(
     String userId,
     DateTime date, [
@@ -93,8 +102,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     if (_isSaving) return;
     final draft = await showDialog<ScheduleEventDraft>(
       context: context,
-      builder: (_) =>
-          ScheduleEventDialog(date: date, existing: event),
+      builder: (_) => ScheduleEventDialog(
+        date: date,
+        existing: event,
+        initialCategory: 'Life',
+        initialStartMinutes: _suggestedStartMinutes(date),
+        allowDateChange: event != null,
+      ),
     );
     if (draft == null || !mounted) return;
 
@@ -105,44 +119,17 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           .scheduleForDate(userId, draft.date)
           .first;
       if (!mounted) return;
-      QueryDocumentSnapshot<Map<String, dynamic>>? conflict;
-      for (final current in currentEvents.docs) {
-        if (current.id == event?.id) continue;
+      final overlaps = currentEvents.docs.any((current) {
+        if (current.id == event?.id) return false;
         final data = current.data();
-        final existingStart = _readInt(data['startMinutes'], fallback: 0);
-        final existingEnd =
-            existingStart + _readInt(data['durationMinutes'], fallback: 0);
-        final newEnd = draft.startMinutes + draft.durationMinutes;
-        if (draft.startMinutes < existingEnd && newEnd > existingStart) {
-          conflict = current;
-          break;
-        }
-      }
-
-      final conflictingEvent = conflict;
-      if (conflictingEvent != null) {
-        await showDialog<void>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            backgroundColor: AppColors.ivory,
-            title: Text(
-              'That time is already planned',
-              style: GoogleFonts.fraunces(
-                fontSize: 21,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
-            ),
-            content: Text(
-              '“${conflictingEvent.data()['title'] ?? 'Another block'}” overlaps this time. Choose a different start or shorten the block so the day stays within 24 hours.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('Adjust time'),
-              ),
-            ],
-          ),
+        final start = _readInt(data['startMinutes'], fallback: 0);
+        final end = start + _readInt(data['durationMinutes'], fallback: 0);
+        return draft.startMinutes < end &&
+            draft.startMinutes + draft.durationMinutes > start;
+      });
+      if (overlaps) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That time overlaps another block.')),
         );
         return;
       }
@@ -173,7 +160,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         setState(() => _selectedDate = draft.date);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(event == null ? 'Event added.' : 'Event updated.'),
+            content: Text(
+              event == null ? 'Time block added.' : 'Time block updated.',
+            ),
           ),
         );
       }
@@ -181,7 +170,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       debugPrint('Schedule event save failed: $error\n$stackTrace');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not save this schedule event.')),
+          const SnackBar(
+            content: Text('Could not save this time block. Please retry.'),
+          ),
         );
       }
     } finally {
@@ -193,23 +184,25 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     String userId,
     QueryDocumentSnapshot<Map<String, dynamic>> event,
   ) async {
+    if (_isSaving) return;
+    final title = event.data()['title']?.toString() ?? 'Time block';
     final confirm = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: AppColors.ivory,
         title: Text(
-          'Delete this event?',
+          'Delete this time block?',
           style: GoogleFonts.fraunces(
             fontSize: 21,
             fontWeight: FontWeight.w600,
             color: AppColors.ink,
           ),
         ),
-        content: Text('“${event.data()['title'] ?? 'Event'}” will be removed.'),
+        content: Text('“$title” will be removed from this day’s plan.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Cancel'),
+            child: const Text('Keep it'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -219,56 +212,28 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       ),
     );
     if (confirm != true || !mounted) return;
+    setState(() => _isSaving = true);
     try {
       await FirestoreService().deleteScheduleEvent(
         userId: userId,
         eventId: event.id,
       );
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Event deleted.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Time block deleted.')),
+        );
       }
     } catch (error, stackTrace) {
       debugPrint('Schedule event delete failed: $error\n$stackTrace');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not delete this event.')),
+          const SnackBar(
+            content: Text('Could not delete this time block. Please retry.'),
+          ),
         );
       }
-    }
-  }
-
-  Future<void> _showEventActions(
-    String userId,
-    QueryDocumentSnapshot<Map<String, dynamic>> event,
-  ) async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: AppColors.ivory,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit or reschedule'),
-              onTap: () => Navigator.of(sheetContext).pop('edit'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline),
-              title: const Text('Delete'),
-              onTap: () => Navigator.of(sheetContext).pop('delete'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (!mounted) return;
-    if (action == 'edit') {
-      await _editEvent(userId, _selectedDay, event);
-    } else if (action == 'delete') {
-      await _deleteEvent(userId, event);
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
@@ -286,192 +251,124 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         final data = snapshot.data?.data() ?? {};
         if (snapshot.hasData) _seedRoutineForDay(user.uid, data);
 
-        final workStartTime = _readString(
-          data['workStartTime'],
-          fallback: '9:00 AM',
-        );
-
-        final workEndTime = _readString(
-          data['workEndTime'],
-          fallback: '6:00 PM',
-        );
-
-        final workdays = _readStringList(data['workdays']);
-
-        final commuteMinutes = _readInt(data['commuteMinutes'], fallback: 60);
-        final dayAbbreviation = const [
-          'Mon',
-          'Tue',
-          'Wed',
-          'Thu',
-          'Fri',
-          'Sat',
-          'Sun',
-        ][_selectedDay.weekday - 1];
-        final isWorkday = workdays.any(
-          (day) =>
-              day.toLowerCase().startsWith(dayAbbreviation.toLowerCase()),
-        );
-        final usualWorkMinutes = isWorkday
-            ? _workDurationMinutes(workStartTime, workEndTime)
-            : 0;
-
         return Scaffold(
           backgroundColor: AppColors.ivory,
-          appBar: AppBar(
-            backgroundColor: AppColors.ivory,
-            elevation: 0,
-            automaticallyImplyLeading: false,
-            titleSpacing: 20,
-            title: Text(
-              'Schedule',
-              style: GoogleFonts.fraunces(
-                fontSize: 28,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
-            ),
-            actions: [
-              IconButton(
-                tooltip: 'Choose date',
-                onPressed: _pickDate,
-                icon: const Icon(Icons.calendar_month_outlined),
-              ),
-              const SizedBox(width: 8),
-            ],
-          ),
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _ScheduleCalendarHeader(
-                  selectedDate: _selectedDay,
-                  weekView: _weekView,
-                  onModeChanged: (weekView) =>
-                      setState(() => _weekView = weekView),
-                  onDateSelected: (date) =>
-                      setState(() => _selectedDate = date),
-                  onPrevious: () => setState(() {
-                    _selectedDate = _selectedDay.add(
-                      Duration(days: _weekView ? -7 : -1),
-                    );
-                  }),
-                  onNext: () => setState(() {
-                    _selectedDate = _selectedDay.add(
-                      Duration(days: _weekView ? 7 : 1),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 16),
-                if (_weekView)
-                  _ScheduleWeekView(
-                    userId: user.uid,
-                    weekStart: _weekStart,
-                    onEventTap: (date, event) =>
-                        _editEvent(user.uid, date, event),
-                    onEventLongPress: (event) =>
-                        _showEventActions(user.uid, event),
-                    onAdd: (date) => _editEvent(user.uid, date),
-                  )
-                else
+          body: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'YOUR WEEK',
+                              style: GoogleFonts.inter(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.3,
+                                color: AppColors.clayDark,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Schedule',
+                              style: GoogleFonts.fraunces(
+                                fontSize: 25,
+                                height: 1.15,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.ink,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'A little room for what matters—at\nwork and beyond.',
+                            style: GoogleFonts.inter(
+                              fontSize: 11.5,
+                              height: 1.4,
+                              color: AppColors.sub,
+                            ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: FilledButton.icon(
+                          onPressed: _isSaving
+                              ? null
+                              : () => _createEvent(user.uid),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, 36),
+                            padding: const EdgeInsets.symmetric(horizontal: 9),
+                            backgroundColor: AppColors.clay,
+                            foregroundColor: Colors.white,
+                            elevation: 2,
+                            shadowColor:
+                                AppColors.clay.withValues(alpha: 0.25),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            textStyle: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          icon: _isSaving
+                              ? const SizedBox(
+                                  width: 13,
+                                  height: 13,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 1.8,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.add, size: 16),
+                          label: const Text('Add activity'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  _ScheduleCalendarHeader(
+                    selectedDate: _selectedDay,
+                    onPickDate: _pickDate,
+                    onDateSelected: (date) =>
+                        setState(() => _selectedDate = date),
+                    onPrevious: () => setState(() {
+                      _selectedDate = _selectedDay.subtract(
+                        const Duration(days: 7),
+                      );
+                    }),
+                    onNext: () => setState(() {
+                      _selectedDate = _selectedDay.add(const Duration(days: 7));
+                    }),
+                  ),
+                  const SizedBox(height: 12),
                   _ScheduleDayView(
+                    key: ValueKey(
+                      'schedule-${_selectedDay.year}-${_selectedDay.month}-${_selectedDay.day}-$_scheduleRetryVersion',
+                    ),
                     userId: user.uid,
                     date: _selectedDay,
-                    usualWorkMinutes: usualWorkMinutes,
-                    usualCommuteMinutes: isWorkday ? commuteMinutes * 2 : 0,
-                    sleepTargetMinutes:
-                        ((data['sleepHours'] is num
-                                    ? (data['sleepHours'] as num).toDouble()
-                                    : 0) *
-                                60)
-                            .round(),
-                    restTargetMinutes:
-                        ((data['restHours'] is num
-                                    ? (data['restHours'] as num).toDouble()
-                                    : 0) *
-                                60)
-                            .round(),
+                    onToday: () => setState(
+                      () => _selectedDate = DateTime.now(),
+                    ),
+                    isSaving: _isSaving,
                     onEventTap: (event) =>
                         _editEvent(user.uid, _selectedDay, event),
-                    onEventLongPress: (event) =>
-                        _showEventActions(user.uid, event),
-                    onAdd: () => _createEvent(user.uid),
+                    onEventDelete: (event) => _deleteEvent(user.uid, event),
+                    onRetry: _retrySchedule,
                   ),
-                const SizedBox(height: 28),
-                Text(
-                  'Your usual work rhythm',
-                  style: GoogleFonts.inter(fontSize: 12, color: AppColors.sub),
-                ),
-                const SizedBox(height: 22),
-                _WorkSummaryCard(
-                  workStartTime: workStartTime,
-                  workEndTime: workEndTime,
-                  workdays: workdays,
-                  commuteMinutes: commuteMinutes,
-                ),
-                const SizedBox(height: 28),
-                Text(
-                  'This week',
-                  style: GoogleFonts.fraunces(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'The circles mark your usual workdays.',
-                  style: GoogleFonts.inter(
-                    fontSize: 11.5,
-                    color: AppColors.sub,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                _WeekDaysCard(workdays: workdays),
-                const SizedBox(height: 28),
-                Text(
-                  'Daily flow',
-                  style: GoogleFonts.fraunces(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Events scheduled for ${MaterialLocalizations.of(context).formatMediumDate(_selectedDay)}.',
-                  style: GoogleFonts.inter(
-                    fontSize: 11.5,
-                    color: AppColors.sub,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                _DailyFlowCard(
-                  userId: user.uid,
-                  date: _selectedDay,
-                  onAdd: () => _editEvent(user.uid, _selectedDay),
-                  onEventTap: (event) =>
-                      _editEvent(user.uid, _selectedDay, event),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: _isSaving ? null : () => _createEvent(user.uid),
-            backgroundColor: AppColors.clay,
-            foregroundColor: Colors.white,
-            tooltip: 'Add schedule event',
-            child: _isSaving
-                ? const SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.add),
           ),
           bottomNavigationBar: const _ScheduleNavigationBar(),
         );
@@ -514,16 +411,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
 class _ScheduleCalendarHeader extends StatelessWidget {
   final DateTime selectedDate;
-  final bool weekView;
-  final ValueChanged<bool> onModeChanged;
+  final VoidCallback onPickDate;
   final ValueChanged<DateTime> onDateSelected;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
 
   const _ScheduleCalendarHeader({
     required this.selectedDate,
-    required this.weekView,
-    required this.onModeChanged,
+    required this.onPickDate,
     required this.onDateSelected,
     required this.onPrevious,
     required this.onNext,
@@ -534,108 +429,201 @@ class _ScheduleCalendarHeader extends StatelessWidget {
     final weekStart = selectedDate.subtract(
       Duration(days: selectedDate.weekday - 1),
     );
+    final weekEnd = weekStart.add(const Duration(days: 6));
+    final range = weekStart.month == weekEnd.month
+        ? '${_monthName(weekStart.month)} ${weekStart.day}–${weekEnd.day}, ${weekEnd.year}'
+        : '${_monthName(weekStart.month)} ${weekStart.day} – ${_monthName(weekEnd.month)} ${weekEnd.day}, ${weekEnd.year}';
     final today = DateTime.now();
-    final isToday =
-        selectedDate.year == today.year &&
-        selectedDate.month == today.month &&
-        selectedDate.day == today.day;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            IconButton(
-              tooltip: 'Previous ${weekView ? 'week' : 'day'}',
-              onPressed: onPrevious,
-              icon: const Icon(Icons.chevron_left),
-            ),
-            Expanded(
-              child: Text(
-                weekView
-                    ? '${MaterialLocalizations.of(context).formatMediumDate(weekStart)} – ${MaterialLocalizations.of(context).formatMediumDate(weekStart.add(const Duration(days: 6)))}'
-                    : MaterialLocalizations.of(
-                        context,
-                      ).formatFullDate(selectedDate),
-                textAlign: TextAlign.center,
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink,
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 7),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppColors.line),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.ink.withValues(alpha: 0.035),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              _WeekArrowButton(
+                tooltip: 'Previous week',
+                icon: Icons.chevron_left,
+                onPressed: onPrevious,
+              ),
+              Expanded(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: onPickDate,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 7),
+                    child: Text(
+                      range,
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
-            IconButton(
-              tooltip: 'Next ${weekView ? 'week' : 'day'}',
-              onPressed: onNext,
-              icon: const Icon(Icons.chevron_right),
-            ),
-          ],
-        ),
-        Center(
-          child: SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(value: false, label: Text('Day')),
-              ButtonSegment(value: true, label: Text('Week')),
+              _WeekArrowButton(
+                tooltip: 'Next week',
+                icon: Icons.chevron_right,
+                onPressed: onNext,
+              ),
             ],
-            selected: {weekView},
-            onSelectionChanged: (selection) => onModeChanged(selection.first),
           ),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 70,
+          const SizedBox(height: 2),
+          _SlidingWeekDays(
+            weekStart: weekStart,
+            selectedDate: selectedDate,
+            today: today,
+            onDateSelected: onDateSelected,
+            onPrevious: onPrevious,
+            onNext: onNext,
+          ),
+        ],
+      ),
+    );
+  }
+
+}
+
+class _SlidingWeekDays extends StatefulWidget {
+  const _SlidingWeekDays({
+    required this.weekStart,
+    required this.selectedDate,
+    required this.today,
+    required this.onDateSelected,
+    required this.onPrevious,
+    required this.onNext,
+  });
+
+  final DateTime weekStart;
+  final DateTime selectedDate;
+  final DateTime today;
+  final ValueChanged<DateTime> onDateSelected;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+
+  @override
+  State<_SlidingWeekDays> createState() => _SlidingWeekDaysState();
+}
+
+class _SlidingWeekDaysState extends State<_SlidingWeekDays> {
+  double _dragDistance = 0;
+  double _slideDirection = 1;
+
+  @override
+  void didUpdateWidget(covariant _SlidingWeekDays oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_isSameDate(oldWidget.weekStart, widget.weekStart)) {
+      _slideDirection = widget.weekStart.isAfter(oldWidget.weekStart) ? 1 : -1;
+    }
+  }
+
+  void _finishSwipe(DragEndDetails details) {
+    final distance = _dragDistance;
+    _dragDistance = 0;
+    final velocity = details.primaryVelocity ?? 0;
+    if (distance <= -24) {
+      widget.onNext();
+    } else if (distance >= 24) {
+      widget.onPrevious();
+    } else if (velocity < -250) {
+      widget.onNext();
+    } else if (velocity > 250) {
+      widget.onPrevious();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 52,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragStart: (_) => _dragDistance = 0,
+        onHorizontalDragUpdate: (details) => _dragDistance += details.delta.dx,
+        onHorizontalDragEnd: _finishSwipe,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) => SlideTransition(
+            position: animation.drive(
+              Tween<Offset>(
+                begin: Offset(_slideDirection * 0.14, 0),
+                end: Offset.zero,
+              ).chain(CurveTween(curve: Curves.easeOutCubic)),
+            ),
+            child: FadeTransition(opacity: animation, child: child),
+          ),
           child: Row(
+            key: ValueKey(
+              '${widget.weekStart.year}-${widget.weekStart.month}-${widget.weekStart.day}',
+            ),
             children: List.generate(7, (index) {
-              final date = weekStart.add(Duration(days: index));
-              final selected =
-                  date.year == selectedDate.year &&
-                  date.month == selectedDate.month &&
-                  date.day == selectedDate.day;
-              final todayDate =
-                  date.year == today.year &&
-                  date.month == today.month &&
-                  date.day == today.day;
+              final date = widget.weekStart.add(Duration(days: index));
+              final selected = _isSameDate(date, widget.selectedDate);
+              final isToday = _isSameDate(date, widget.today);
               return Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 1),
                   child: Material(
-                    color: selected ? AppColors.eucalyptus : Colors.transparent,
-                    borderRadius: BorderRadius.circular(12),
+                    color: selected
+                        ? AppColors.eucalyptusDark
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(10),
                     child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () => onDateSelected(date),
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => widget.onDateSelected(date),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Text(
-                            _weekdayLetter(date.weekday),
+                            _shortWeekday(date.weekday),
                             style: GoogleFonts.inter(
-                              fontSize: 9,
+                              fontSize: 8,
+                              fontWeight: FontWeight.w500,
                               color: selected
-                                  ? AppColors.eucalyptusDark
+                                  ? Colors.white.withValues(alpha: 0.85)
                                   : AppColors.sub,
                             ),
                           ),
-                          const SizedBox(height: 5),
+                          const SizedBox(height: 3),
                           Text(
                             '${date.day}',
-                            style: GoogleFonts.inter(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.ink,
+                            style: GoogleFonts.fraunces(
+                              fontSize: 14,
+                              height: 1,
+                              fontWeight: FontWeight.w600,
+                              color: selected ? Colors.white : AppColors.ink,
                             ),
                           ),
-                          if (todayDate)
-                            Container(
-                              margin: const EdgeInsets.only(top: 3),
-                              width: 4,
-                              height: 4,
-                              decoration: const BoxDecoration(
-                                color: AppColors.clayDark,
-                                shape: BoxShape.circle,
-                              ),
+                          const SizedBox(height: 3),
+                          Container(
+                            width: 3,
+                            height: 3,
+                            decoration: BoxDecoration(
+                              color: isToday
+                                  ? (selected
+                                        ? AppColors.peach
+                                        : AppColors.clay)
+                                  : Colors.transparent,
+                              shape: BoxShape.circle,
                             ),
+                          ),
                         ],
                       ),
                     ),
@@ -645,88 +633,423 @@ class _ScheduleCalendarHeader extends StatelessWidget {
             }),
           ),
         ),
-        if (isToday)
-          Padding(
-            padding: const EdgeInsets.only(left: 4, top: 3),
-            child: Text(
-              'Today',
-              style: GoogleFonts.inter(
-                fontSize: 9,
-                color: AppColors.eucalyptusDark,
-              ),
-            ),
-          ),
-      ],
+      ),
+    );
+  }
+}
+
+class _WeekArrowButton extends StatelessWidget {
+  const _WeekArrowButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: tooltip,
+    visualDensity: VisualDensity.compact,
+    constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+    padding: EdgeInsets.zero,
+    onPressed: onPressed,
+    icon: Icon(icon, size: 17, color: AppColors.ink),
+  );
+}
+
+class _ScheduleDayView extends StatefulWidget {
+  final String userId;
+  final DateTime date;
+  final VoidCallback onToday;
+  final bool isSaving;
+  final ValueChanged<QueryDocumentSnapshot<Map<String, dynamic>>> onEventTap;
+  final ValueChanged<QueryDocumentSnapshot<Map<String, dynamic>>>
+  onEventDelete;
+  final VoidCallback onRetry;
+
+  const _ScheduleDayView({
+    super.key,
+    required this.userId,
+    required this.date,
+    required this.onToday,
+    required this.isSaving,
+    required this.onEventTap,
+    required this.onEventDelete,
+    required this.onRetry,
+  });
+
+  @override
+  State<_ScheduleDayView> createState() => _ScheduleDayViewState();
+}
+
+class _ScheduleDayViewState extends State<_ScheduleDayView> {
+  late Stream<QuerySnapshot<Map<String, dynamic>>> _scheduleStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleStream = FirestoreService().scheduleForDate(
+      widget.userId,
+      widget.date,
     );
   }
 
-  static String _weekdayLetter(int weekday) =>
-      const ['M', 'T', 'W', 'T', 'F', 'S', 'S'][weekday - 1];
-}
-
-class _ScheduleDayView extends StatelessWidget {
-  final String userId;
-  final DateTime date;
-  final int usualWorkMinutes;
-  final int usualCommuteMinutes;
-  final int sleepTargetMinutes;
-  final int restTargetMinutes;
-  final ValueChanged<QueryDocumentSnapshot<Map<String, dynamic>>> onEventTap;
-  final ValueChanged<QueryDocumentSnapshot<Map<String, dynamic>>>
-  onEventLongPress;
-  final VoidCallback onAdd;
-
-  const _ScheduleDayView({
-    required this.userId,
-    required this.date,
-    required this.usualWorkMinutes,
-    required this.usualCommuteMinutes,
-    required this.sleepTargetMinutes,
-    required this.restTargetMinutes,
-    required this.onEventTap,
-    required this.onEventLongPress,
-    required this.onAdd,
-  });
+  @override
+  void didUpdateWidget(covariant _ScheduleDayView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.userId != oldWidget.userId ||
+        !DateUtils.isSameDay(widget.date, oldWidget.date)) {
+      _scheduleStream = FirestoreService().scheduleForDate(
+        widget.userId,
+        widget.date,
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirestoreService().scheduleForDate(userId, date),
+      stream: _scheduleStream,
       builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return const _ScheduleLoadError();
-        }
-        if (!snapshot.hasData) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 40),
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
-        final events = snapshot.data!.docs;
+        final events = [...?snapshot.data?.docs]
+          ..sort((a, b) {
+            final aStart = _readInt(a.data()['startMinutes'], fallback: 0);
+            final bStart = _readInt(b.data()['startMinutes'], fallback: 0);
+            return aStart.compareTo(bStart);
+          });
+        final canEdit =
+            snapshot.hasData && !snapshot.hasError && !widget.isSaving;
+        final isToday = DateUtils.isSameDay(widget.date, DateTime.now());
+        final title = isToday
+            ? 'Today’s schedule'
+            : '${_shortWeekday(widget.date.weekday)}, '
+                  '${_monthName(widget.date.month)} ${widget.date.day}';
+
         return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            DayAllocationCard(
-              events: events,
-              usualWorkMinutes: usualWorkMinutes,
-              usualCommuteMinutes: usualCommuteMinutes,
-              sleepTargetMinutes: sleepTargetMinutes,
-              restTargetMinutes: restTargetMinutes,
-            ),
-            const SizedBox(height: 12),
-            if (events.isEmpty)
-              _ScheduleEmptyState(onAdd: onAdd)
-            else
-              for (var index = 0; index < events.length; index++)
-                _TimelineEventTile(
-                  event: events[index],
-                  isLast: index == events.length - 1,
-                  onTap: () => onEventTap(events[index]),
-                  onLongPress: () => onEventLongPress(events[index]),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: GoogleFonts.fraunces(
+                      fontSize: 18,
+                      height: 1.2,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                    ),
+                  ),
                 ),
+                TextButton(
+                  onPressed: widget.onToday,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.clayDark,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 6,
+                    ),
+                    minimumSize: const Size(0, 34),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    textStyle: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('Today'),
+                      SizedBox(width: 2),
+                      Icon(Icons.chevron_right, size: 15),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (snapshot.hasError)
+              _ScheduleRetryCard(onRetry: widget.onRetry)
+            else if (snapshot.connectionState == ConnectionState.waiting &&
+                !snapshot.hasData)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 22),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (events.isEmpty)
+              const _ScheduleEmptyCard()
+            else
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: AppColors.line),
+                ),
+                child: Column(
+                  children: [
+                    for (var index = 0; index < events.length; index++) ...[
+                      _ScheduleListRow(
+                        event: events[index],
+                        enabled: canEdit,
+                        onEdit: () => widget.onEventTap(events[index]),
+                        onDelete: () => widget.onEventDelete(events[index]),
+                      ),
+                      if (index < events.length - 1)
+                        const Divider(
+                          height: 1,
+                          indent: 15,
+                          endIndent: 15,
+                          color: AppColors.line,
+                        ),
+                    ],
+                  ],
+                ),
+              ),
           ],
         );
       },
     );
+  }
+}
+
+class _ScheduleListRow extends StatelessWidget {
+  const _ScheduleListRow({
+    required this.event,
+    required this.enabled,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final QueryDocumentSnapshot<Map<String, dynamic>> event;
+  final bool enabled;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = event.data();
+    final start =
+        _readInt(data['startMinutes'], fallback: 0).clamp(0, 1439).toInt();
+    final duration = _readInt(data['durationMinutes'], fallback: 0);
+    final category = _displayArea(data['category']?.toString() ?? 'Life');
+    final title = data['title']?.toString() ?? 'Untitled block';
+    final compact = MediaQuery.sizeOf(context).width < 360;
+    final timeWidth = compact ? 54.0 : 68.0;
+    final actionSize = compact ? 30.0 : 34.0;
+
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 8 : 12,
+        vertical: 9,
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: timeWidth,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _formatEventTime(start),
+                  style: GoogleFonts.inter(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.eucalyptusDark,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '$duration min',
+                  style: GoogleFonts.inter(
+                    fontSize: 10.5,
+                    color: AppColors.sub,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: 4,
+            height: 38,
+            decoration: BoxDecoration(
+              color: _scheduleCategoryColor(category),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          SizedBox(width: compact ? 7 : 10),
+          Expanded(
+            child: InkWell(
+              onTap: enabled ? onEdit : null,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      category,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 11.5,
+                        color: AppColors.sub,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (compact)
+            PopupMenuButton<String>(
+              tooltip: 'Time block options',
+              enabled: enabled,
+              padding: EdgeInsets.zero,
+              iconSize: 18,
+              onSelected: (action) {
+                if (action == 'edit') onEdit();
+                if (action == 'delete') onDelete();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'edit', child: Text('Edit time block')),
+                PopupMenuItem(value: 'delete', child: Text('Delete time block')),
+              ],
+              child: SizedBox(
+                width: actionSize,
+                height: actionSize,
+                child: const Icon(Icons.more_horiz, size: 18),
+              ),
+            )
+          else ...[
+            IconButton(
+              tooltip: 'Edit time block',
+              onPressed: enabled ? onEdit : null,
+              visualDensity: VisualDensity.compact,
+              constraints: BoxConstraints.tightFor(
+                width: actionSize,
+                height: actionSize,
+              ),
+              padding: EdgeInsets.zero,
+              icon: const Icon(Icons.edit_outlined, size: 17),
+              color: AppColors.eucalyptusDark,
+            ),
+            IconButton(
+              tooltip: 'Delete time block',
+              onPressed: enabled ? onDelete : null,
+              visualDensity: VisualDensity.compact,
+              constraints: BoxConstraints.tightFor(
+                width: actionSize,
+                height: actionSize,
+              ),
+              padding: EdgeInsets.zero,
+              icon: const Icon(Icons.delete_outline, size: 17),
+              color: AppColors.clayDark,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ScheduleEmptyCard extends StatelessWidget {
+  const _ScheduleEmptyCard();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 23),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: AppColors.line),
+    ),
+    child: Column(
+      children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: AppColors.eucalyptus,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: const Icon(
+            Icons.calendar_today_outlined,
+            color: AppColors.eucalyptusDark,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'No time blocks planned',
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: AppColors.ink,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Your day is open.',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(fontSize: 13, color: AppColors.sub),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ScheduleRetryCard extends StatelessWidget {
+  const _ScheduleRetryCard({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(15),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: AppColors.line),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.cloud_off_outlined, color: AppColors.sub, size: 19),
+        const SizedBox(width: 10),
+        const Expanded(child: Text('Could not load this day’s schedule.')),
+        TextButton(onPressed: onRetry, child: const Text('Retry')),
+      ],
+    ),
+  );
+}
+
+Color _scheduleCategoryColor(String category) {
+  switch (category.toLowerCase()) {
+    case 'work':
+      return AppColors.clayDark;
+    case 'commute':
+      return AppColors.clay.withValues(alpha: 0.7);
+    case 'sleep':
+      return AppColors.pistachio;
+    case 'rest':
+    case 'life':
+      return AppColors.eucalyptusDark;
+    default:
+      return AppColors.eucalyptusDark;
   }
 }
 
@@ -861,7 +1184,6 @@ class _ScheduleWeekDay extends StatelessWidget {
                   _TimelineEventTile(
                     event: event,
                     compact: true,
-                    isLast: true,
                     onTap: () => onEventTap(date, event),
                     onLongPress: () => onEventLongPress(event),
                   ),
@@ -875,14 +1197,12 @@ class _ScheduleWeekDay extends StatelessWidget {
 
 class _TimelineEventTile extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> event;
-  final bool isLast;
   final bool compact;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
   const _TimelineEventTile({
     required this.event,
-    required this.isLast,
     required this.onTap,
     required this.onLongPress,
     this.compact = false,
@@ -891,90 +1211,184 @@ class _TimelineEventTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = event.data();
-    final start = _formatEventTime(_readInt(data['startMinutes']));
+    final rawStart = _formatEventTime(_readInt(data['startMinutes']));
+    final timeParts = rawStart.split(' ');
     final duration = _readInt(data['durationMinutes']);
     final title = data['title']?.toString() ?? 'Untitled event';
     final category = _displayArea(data['category']?.toString() ?? 'Life');
     final notes = data['notes']?.toString().trim() ?? '';
     final color = _eventColor(category);
+    final eventSurface = _eventSurfaceColor(category);
+    final detail = notes.isEmpty ? '$duration min' : '$notes · $duration min';
 
     return GestureDetector(
       onLongPress: onLongPress,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(4, compact ? 5 : 8, 4, compact ? 5 : 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: compact ? 56 : 66,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 7),
-                  child: Text(
-                    start,
-                    style: GoogleFonts.inter(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.sub,
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(
-                width: 2,
-                height: compact ? 39 : 52,
-                child: ColoredBox(color: isLast ? Colors.transparent : color),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Icon(_eventIcon(category), size: 16, color: color),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
+      child: Padding(
+        padding: EdgeInsets.symmetric(vertical: compact ? 3 : 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 39,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 7, right: 4),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      title,
+                      timeParts.first,
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
                         color: AppColors.ink,
                       ),
                     ),
-                    const SizedBox(height: 2),
                     Text(
-                      '$category · $duration min${notes.isEmpty ? '' : ' · $notes'}',
-                      maxLines: compact ? 1 : 2,
-                      overflow: TextOverflow.ellipsis,
+                      timeParts.length > 1 ? timeParts[1] : '',
                       style: GoogleFonts.inter(
-                        fontSize: 9.5,
+                        fontSize: 7,
                         color: AppColors.sub,
                       ),
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right, size: 18, color: AppColors.sub),
-            ],
-          ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: eventSurface,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      width: 2.5,
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: const BorderRadius.horizontal(
+                          left: Radius.circular(10),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: onTap,
+                          borderRadius: BorderRadius.circular(10),
+                          child: Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              9,
+                              compact ? 7 : 8,
+                              4,
+                              compact ? 7 : 8,
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        category.toUpperCase(),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 6.5,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 0.65,
+                                          color: AppColors.sub,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.ink,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        detail,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 7.5,
+                                          color: AppColors.sub,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 28,
+                                  height: 28,
+                                  child: IconButton(
+                                    tooltip: 'Event options',
+                                    padding: EdgeInsets.zero,
+                                    visualDensity: VisualDensity.compact,
+                                    constraints: const BoxConstraints.tightFor(
+                                      width: 28,
+                                      height: 28,
+                                    ),
+                                    onPressed: onLongPress,
+                                    icon: const Icon(
+                                      Icons.more_horiz,
+                                      size: 17,
+                                      color: AppColors.sub,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-int _readInt(dynamic value) => value is num ? value.round() : 0;
+int _readInt(dynamic value, {int fallback = 0}) =>
+    value is num ? value.round() : fallback;
+
+bool _isSameDate(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+
+String _monthName(int month) => const [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+][month - 1];
+
+String _shortWeekday(int weekday) =>
+    const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][weekday - 1];
 
 String _weekdayName(int weekday) => const [
   'Monday',
@@ -985,34 +1399,6 @@ String _weekdayName(int weekday) => const [
   'Saturday',
   'Sunday',
 ][weekday - 1];
-
-int _workDurationMinutes(String startTime, String endTime) {
-  final start = _parseClockMinutes(startTime);
-  final end = _parseClockMinutes(endTime);
-  if (start == null || end == null) return 8 * 60;
-  final duration = end > start ? end - start : end + 1440 - start;
-  return duration.clamp(0, 1440).toInt();
-}
-
-int? _parseClockMinutes(String value) {
-  final match = RegExp(
-    r'^\s*(\d{1,2}):(\d{2})\s*(AM|PM)\s*$',
-    caseSensitive: false,
-  ).firstMatch(value);
-  if (match == null) return null;
-  final hour12 = int.tryParse(match.group(1)!);
-  final minute = int.tryParse(match.group(2)!);
-  if (hour12 == null ||
-      minute == null ||
-      hour12 < 1 ||
-      hour12 > 12 ||
-      minute > 59) {
-    return null;
-  }
-  var hour24 = hour12 % 12;
-  if (match.group(3)!.toUpperCase() == 'PM') hour24 += 12;
-  return hour24 * 60 + minute;
-}
 
 String _formatEventTime(int totalMinutes) {
   final clamped = totalMinutes.clamp(0, 1439);
@@ -1025,45 +1411,56 @@ String _formatEventTime(int totalMinutes) {
 Color _eventColor(String category) {
   switch (category.toLowerCase()) {
     case 'work':
-      return AppColors.clayDark;
-    case 'commute':
       return AppColors.clay;
+    case 'commute':
+      return const Color(0xFFB97C55);
     case 'sleep':
       return AppColors.eucalyptusDark;
+    case 'focus':
+      return const Color(0xFFC9786D);
     case 'rest':
+      return const Color(0xFF788660);
     case 'life':
     case 'meals':
+    case 'personal':
       return AppColors.eucalyptusDark;
     default:
       return AppColors.eucalyptusDark;
   }
 }
 
-IconData _eventIcon(String category) {
+Color _eventSurfaceColor(String category) {
   switch (category.toLowerCase()) {
     case 'work':
-      return Icons.work_outline;
-    case 'sleep':
-      return Icons.bedtime_outlined;
-    case 'meals':
-      return Icons.restaurant_outlined;
-    case 'rest':
-      return Icons.self_improvement_outlined;
+      return const Color(0xFFFBF2E5);
     case 'commute':
-      return Icons.directions_transit_outlined;
+      return const Color(0xFFF5E9DE);
+    case 'sleep':
+      return const Color(0xFFEEF0E2);
+    case 'focus':
+      return const Color(0xFFF7E9E5);
+    case 'rest':
+      return const Color(0xFFEEF0E2);
+    case 'meals':
+    case 'life':
+    case 'personal':
     default:
-      return Icons.nature_people_outlined;
+      return const Color(0xFFF0F1E4);
   }
 }
 
-String _displayArea(String category) => switch (category.trim().toLowerCase()) {
-  'work' => 'Work',
-  'commute' => 'Commute',
-  'sleep' => 'Sleep',
-  'rest' => 'Rest',
-  'meals' => 'Meals',
-  _ => 'Life',
-};
+String _displayArea(String category) {
+  final normalized = category.trim();
+  return switch (normalized.toLowerCase()) {
+    'work' => 'Work',
+    'commute' => 'Commute',
+    'sleep' => 'Sleep',
+    'rest' => 'Rest',
+    'meals' => 'Meals',
+    'life' => 'Life',
+    _ => 'Life',
+  };
+}
 
 class _ScheduleEmptyState extends StatelessWidget {
   final VoidCallback onAdd;
@@ -1742,7 +2139,6 @@ class _DailyFlowCard extends StatelessWidget {
               for (var index = 0; index < events.length; index++)
                 _TimelineEventTile(
                   event: events[index],
-                  isLast: index == events.length - 1,
                   onTap: () => onEventTap(events[index]),
                   onLongPress: () => onEventTap(events[index]),
                 ),
